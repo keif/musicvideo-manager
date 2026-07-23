@@ -2008,9 +2008,14 @@ type Result struct {
 }
 
 type job struct {
+	root     string
 	relPath  string
 	info     FileInfo
 	existing *catalog.Video // nil if no active catalog row at this path
+}
+
+func (j job) fullPath() string {
+	return filepath.Join(j.root, filepath.FromSlash(j.relPath))
 }
 
 type probed struct {
@@ -2053,7 +2058,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, root string, extensions []st
 			result.Unchanged++
 			continue
 		}
-		toProcess = append(toProcess, job{relPath: relPath, info: info, existing: existing})
+		toProcess = append(toProcess, job{root: root, relPath: relPath, info: info, existing: existing})
 	}
 
 	if err := r.processJobs(ctx, toProcess, now, &result); err != nil {
@@ -2091,8 +2096,6 @@ func (r *Reconciler) processJobs(ctx context.Context, jobs []job, now int64, res
 		go func() {
 			defer wg.Done()
 			for j := range jobsCh {
-				fullPath := filepath.Join(filepath.FromSlash(""), j.relPath)
-				_ = fullPath
 				hash, herr := r.Hash(j.fullPath())
 				if herr != nil {
 					resultsCh <- probed{job: j, err: herr}
@@ -2221,23 +2224,6 @@ func nullString(v string) sql.NullString {
 	return sql.NullString{String: v, Valid: true}
 }
 ```
-
-The `job` type needs its root directory to build a full path inside the worker goroutine. Fix this by storing `root` on the job instead of the placeholder logic above — replace the `job` struct and the two job-construction sites accordingly:
-
-```go
-type job struct {
-	root     string
-	relPath  string
-	info     FileInfo
-	existing *catalog.Video
-}
-
-func (j job) fullPath() string {
-	return filepath.Join(j.root, filepath.FromSlash(j.relPath))
-}
-```
-
-And update `Reconcile` to set `root: root` when constructing each `job{...}` literal, and delete the two dead lines inside the worker goroutine (`fullPath := filepath.Join(filepath.FromSlash(""), j.relPath)` and `_ = fullPath`), calling `j.fullPath()` directly as already shown in `processJobs` above.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2464,11 +2450,11 @@ func TestScanCommandTextOutput(t *testing.T) {
 	generateFixtureVideo(t, filepath.Join(root, "Artist", "Song.mp4"), 1)
 
 	var out bytes.Buffer
-	root_cmd := cli.NewRootCmd("test")
-	root_cmd.SetOut(&out)
-	root_cmd.SetArgs([]string{"scan", root})
+	rootCmd := cli.NewRootCmd("test")
+	rootCmd.SetOut(&out)
+	rootCmd.SetArgs([]string{"scan", root})
 
-	if err := root_cmd.Execute(); err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -2490,11 +2476,11 @@ func TestScanCommandJSONOutput(t *testing.T) {
 	generateFixtureVideo(t, filepath.Join(root, "Song.mp4"), 1)
 
 	var out bytes.Buffer
-	root_cmd := cli.NewRootCmd("test")
-	root_cmd.SetOut(&out)
-	root_cmd.SetArgs([]string{"scan", root, "--json"})
+	rootCmd := cli.NewRootCmd("test")
+	rootCmd.SetOut(&out)
+	rootCmd.SetArgs([]string{"scan", root, "--json"})
 
-	if err := root_cmd.Execute(); err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 
@@ -2542,22 +2528,22 @@ func TestScanCommandSecondRunReportsUnchanged(t *testing.T) {
 }
 
 func TestScanCommandNonexistentRoot(t *testing.T) {
-	root_cmd := cli.NewRootCmd("test")
-	root_cmd.SetOut(&bytes.Buffer{})
-	root_cmd.SetArgs([]string{"scan", "/does/not/exist"})
+	rootCmd := cli.NewRootCmd("test")
+	rootCmd.SetOut(&bytes.Buffer{})
+	rootCmd.SetArgs([]string{"scan", "/does/not/exist"})
 
-	if err := root_cmd.Execute(); err == nil {
+	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("expected error scanning a nonexistent root")
 	}
 }
 
 func TestVersionCommand(t *testing.T) {
 	var out bytes.Buffer
-	root_cmd := cli.NewRootCmd("v1.2.3")
-	root_cmd.SetOut(&out)
-	root_cmd.SetArgs([]string{"version"})
+	rootCmd := cli.NewRootCmd("v1.2.3")
+	rootCmd.SetOut(&out)
+	rootCmd.SetArgs([]string{"version"})
 
-	if err := root_cmd.Execute(); err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if out.String() != "v1.2.3\n" {
