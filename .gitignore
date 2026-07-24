@@ -1,1 +1,7 @@
-.worktrees/
+/musicvideo-manager
+/dist/
+*.sqlite
+*.sqlite-journal
+.musicvideo-manager/
+testdata/fixtures/*.mp4
+!testdata/fixtures/.gitkeep
