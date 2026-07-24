@@ -5,3 +5,4 @@
 .musicvideo-manager/
 testdata/fixtures/*.mp4
 !testdata/fixtures/.gitkeep
+.worktrees/
