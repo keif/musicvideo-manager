@@ -49,7 +49,7 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
-// Save writes cfg to path, creating the parent directory if needed.
+// Save writes cfg to path. The caller is responsible for ensuring the parent directory exists.
 func Save(path string, cfg Config) error {
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
