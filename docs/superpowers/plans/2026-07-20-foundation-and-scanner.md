@@ -1963,6 +1963,20 @@ Expected: FAIL — `undefined: scanner.Reconciler`
 
 - [ ] **Step 3: Implement `reconcile.go`**
 
+Note: this code was corrected during implementation. An earlier version of
+this block marked unseen active rows missing *after* running the worker
+pool, which meant a same-pass rename's old-path row was still `status =
+'active'` (not yet `'missing'`) when the new path was matched via
+`FindMissingByHash` — causing a rename to be misclassified as one `Added`
++ one `Missing` instead of a single `Moved`. It also returned immediately
+on a fatal catalog error while workers could still be blocked sending on
+the unbuffered `resultsCh`, leaking goroutines. The code below marks
+unseen rows missing *before* the worker pool runs (tracking newly-missing
+IDs so a same-pass move doesn't get double-counted) and drains `resultsCh`
+to completion before returning a fatal error. This is the version to
+implement — it has been tested and passes `TestReconcileDetectsRename`
+along with the other five Reconcile tests, including under `-race`.
+
 ```go
 package scanner
 
@@ -2061,23 +2075,39 @@ func (r *Reconciler) Reconcile(ctx context.Context, root string, extensions []st
 		toProcess = append(toProcess, job{root: root, relPath: relPath, info: info, existing: existing})
 	}
 
-	if err := r.processJobs(ctx, toProcess, now, &result); err != nil {
-		return Result{}, err
-	}
-
+	// Mark unseen active rows missing before processing new/changed files.
+	// This must happen first so that move/rename detection (which matches
+	// against status = 'missing' rows via FindMissingByHash) can see a
+	// same-pass rename's old-path row: the old path is absent from
+	// `discovered`, but its catalog row is still 'active' until this loop
+	// runs. If this ran after processJobs instead, a rename would be
+	// misclassified as an Added + Missing pair rather than a single Moved.
+	//
+	// newlyMissing tracks the IDs marked here so that, if move detection
+	// below consumes one of them as a rename candidate, it can be removed
+	// from the missing count instead of being double-counted as both
+	// Missing and Moved. Candidates already missing from a prior scan pass
+	// (the "resurrected" case) are not in this set and are left alone.
+	newlyMissing := make(map[int64]bool, len(byPath))
 	for relPath, v := range byPath {
 		if !seenPaths[relPath] {
 			if err := r.Catalog.MarkMissing(v.ID); err != nil {
 				return Result{}, fmt.Errorf("mark missing %s: %w", relPath, err)
 			}
-			result.Missing++
+			newlyMissing[v.ID] = true
 		}
 	}
+
+	if err := r.processJobs(ctx, toProcess, now, &result, newlyMissing); err != nil {
+		return Result{}, err
+	}
+
+	result.Missing = len(newlyMissing)
 
 	return result, nil
 }
 
-func (r *Reconciler) processJobs(ctx context.Context, jobs []job, now int64, result *Result) error {
+func (r *Reconciler) processJobs(ctx context.Context, jobs []job, now int64, result *Result, newlyMissing map[int64]bool) error {
 	if len(jobs) == 0 {
 		return nil
 	}
@@ -2118,19 +2148,26 @@ func (r *Reconciler) processJobs(ctx context.Context, jobs []job, now int64, res
 		close(resultsCh)
 	}()
 
+	// Drain resultsCh to completion even after a fatal applyResult error:
+	// workers and the job-feeder goroutine above send on these channels
+	// unbuffered, so returning early here while they're still in flight
+	// would leave them permanently blocked on a send nobody is reading —
+	// a goroutine leak. Recording the first error and continuing to drain
+	// lets every goroutine finish and every channel close normally.
+	var firstErr error
 	for p := range resultsCh {
 		if p.err != nil {
 			result.Errors = append(result.Errors, ScanErrorEntry{Path: p.job.relPath, Message: p.err.Error()})
 			continue
 		}
-		if err := r.applyResult(p, now, result); err != nil {
-			return err
+		if err := r.applyResult(p, now, result, newlyMissing); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
-func (r *Reconciler) applyResult(p probed, now int64, result *Result) error {
+func (r *Reconciler) applyResult(p probed, now int64, result *Result, newlyMissing map[int64]bool) error {
 	if p.job.existing != nil {
 		v := &catalog.Video{
 			ID: p.job.existing.ID, Path: p.job.relPath,
@@ -2170,6 +2207,10 @@ func (r *Reconciler) applyResult(p probed, now int64, result *Result) error {
 		if err := r.Catalog.UpdatePath(best.ID, p.job.relPath, p.job.info.MTime, now); err != nil {
 			return fmt.Errorf("update path %s: %w", p.job.relPath, err)
 		}
+		// If best.ID was marked missing earlier in this same pass (a
+		// same-scan rename), it's no longer missing now that it's been
+		// reattached to the new path — don't double-count it as Missing.
+		delete(newlyMissing, best.ID)
 		result.Moved++
 		return nil
 	}
