@@ -2900,7 +2900,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
 
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
@@ -2922,7 +2922,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25"
       - uses: golangci/golangci-lint-action@v6
         with:
           version: latest
