@@ -1,0 +1,6 @@
+services:
+  musicvideo-manager:
+    build: .
+    volumes:
+      - ./library:/library
+    command: ["scan", "/library"]
