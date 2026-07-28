@@ -1,7 +1,16 @@
 package main
 
-import "fmt"
+import (
+	"os"
+
+	"github.com/keif/musicvideo-manager/internal/cli"
+)
+
+var version = "dev"
 
 func main() {
-	fmt.Println("musicvideo-manager")
+	root := cli.NewRootCmd(version)
+	if err := root.Execute(); err != nil {
+		os.Exit(1)
+	}
 }
