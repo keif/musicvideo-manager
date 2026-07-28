@@ -371,6 +371,7 @@ func TestUpsertSongInsertsNewRow(t *testing.T) {
 		t.Fatal("expected non-zero id")
 	}
 
+	var found *catalog.Song
 	found, ok, err := cat.FindSongByMBID("song-mbid-1")
 	if err != nil {
 		t.Fatalf("FindSongByMBID: %v", err)
@@ -425,6 +426,7 @@ func TestUpsertSongFallsBackToArtistAndTitleWhenMBIDEmpty(t *testing.T) {
 		t.Fatalf("expected same song id when matched by artist+title, got %d and %d", first, second)
 	}
 
+	var found *catalog.Song
 	found, ok, err := cat.FindSongByArtistAndTitle(artistID, "Some Title")
 	if err != nil {
 		t.Fatalf("FindSongByArtistAndTitle: %v", err)
