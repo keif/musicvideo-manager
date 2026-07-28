@@ -10,9 +10,10 @@ import (
 // Config is the per-library configuration stored at
 // <library-root>/.musicvideo-manager/config.yaml.
 type Config struct {
-	SchemaVersion int        `yaml:"schema_version"`
-	Library       Library    `yaml:"library"`
-	Scan          ScanConfig `yaml:"scan"`
+	SchemaVersion int         `yaml:"schema_version"`
+	Library       Library     `yaml:"library"`
+	Scan          ScanConfig  `yaml:"scan"`
+	Match         MatchConfig `yaml:"match"`
 }
 
 type Library struct {
@@ -24,6 +25,10 @@ type ScanConfig struct {
 	Workers    int      `yaml:"workers"`
 }
 
+type MatchConfig struct {
+	ConfidenceThreshold float64 `yaml:"confidence_threshold"`
+}
+
 // Default returns the default configuration for a newly discovered library.
 func Default(libraryName string) Config {
 	return Config{
@@ -32,6 +37,9 @@ func Default(libraryName string) Config {
 		Scan: ScanConfig{
 			Extensions: []string{"mp4", "mkv", "avi", "mov", "m4v", "ts", "mpg", "webm"},
 			Workers:    0,
+		},
+		Match: MatchConfig{
+			ConfidenceThreshold: 0.7,
 		},
 	}
 }
