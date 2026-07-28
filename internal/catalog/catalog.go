@@ -95,11 +95,11 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("begin tx for migration %d: %w", m.version, err)
 		}
 		if _, err := tx.Exec(string(sqlBytes)); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %d: %w", m.version, err)
 		}
 		if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, m.version, time.Now().Unix()); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("record migration %d: %w", m.version, err)
 		}
 		if err := tx.Commit(); err != nil {
