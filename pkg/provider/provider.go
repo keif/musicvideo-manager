@@ -12,12 +12,13 @@ type MatchQuery struct {
 
 // MatchResult is a single candidate identification returned by a provider.
 type MatchResult struct {
-	Artist     string
-	Title      string
-	Album      string
-	Year       int
-	Confidence float64 // 0.0-1.0
-	SourceID   string  // provider-specific ID (MBID, Discogs ID, etc.)
+	Artist         string
+	Title          string
+	Album          string
+	Year           int
+	Confidence     float64 // 0.0-1.0
+	SourceID       string  // provider-specific ID for the matched song/recording (MBID, Discogs ID, etc.)
+	ArtistSourceID string  // provider-specific ID for the matched artist (MBID, Discogs artist ID, etc.)
 }
 
 // MetadataProvider is implemented by each metadata source (MusicBrainz,

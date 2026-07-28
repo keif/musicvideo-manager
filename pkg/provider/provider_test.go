@@ -38,3 +38,18 @@ func TestFakeProviderSatisfiesInterface(t *testing.T) {
 		t.Fatalf("expected Name() %q, got %q", "fake", p.Name())
 	}
 }
+
+func TestMatchResultCarriesArtistSourceID(t *testing.T) {
+	result := provider.MatchResult{
+		Artist:         "50 Cent",
+		Title:          "In Da Club",
+		SourceID:       "recording-mbid",
+		ArtistSourceID: "artist-mbid",
+	}
+	if result.ArtistSourceID != "artist-mbid" {
+		t.Fatalf("expected ArtistSourceID %q, got %q", "artist-mbid", result.ArtistSourceID)
+	}
+	if result.SourceID != "recording-mbid" {
+		t.Fatalf("expected SourceID %q, got %q", "recording-mbid", result.SourceID)
+	}
+}
