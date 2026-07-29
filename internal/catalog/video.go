@@ -137,3 +137,12 @@ func (c *Catalog) MarkMissing(id int64) error {
 	_, err := c.db.Exec(`UPDATE videos SET status = 'missing' WHERE id = ?`, id)
 	return err
 }
+
+// UpdateVideoPath updates a video's path only, used by the rename engine.
+// Unlike UpdatePath (scan reconciliation), this does not touch status or
+// last_seen_at/last_scanned_at -- a rename isn't "seeing" the file for the
+// first time, just relocating it.
+func (c *Catalog) UpdateVideoPath(id int64, newPath string) error {
+	_, err := c.db.Exec(`UPDATE videos SET path = ? WHERE id = ?`, newPath, id)
+	return err
+}

@@ -189,3 +189,33 @@ func TestUpdateProbeSetsMetadataFields(t *testing.T) {
 func sqlNullFloat(v float64) sql.NullFloat64 { return sql.NullFloat64{Float64: v, Valid: true} }
 func sqlNullInt(v int64) sql.NullInt64       { return sql.NullInt64{Int64: v, Valid: true} }
 func sqlNullString(v string) sql.NullString  { return sql.NullString{String: v, Valid: true} }
+
+func TestUpdateVideoPathChangesOnlyPath(t *testing.T) {
+	cat := openTestCatalog(t)
+	id, err := cat.InsertVideo(&catalog.Video{
+		Path: "old/Path.mp4", FileSize: 10, MTime: 1, PartialHash: "h",
+		Status: catalog.StatusActive, FirstSeenAt: 1, LastSeenAt: 1, LastScannedAt: 1,
+	})
+	if err != nil {
+		t.Fatalf("InsertVideo: %v", err)
+	}
+
+	if err := cat.UpdateVideoPath(id, "new/Path.mp4"); err != nil {
+		t.Fatalf("UpdateVideoPath: %v", err)
+	}
+
+	active, err := cat.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	if len(active) != 1 {
+		t.Fatalf("expected 1 active video, got %d", len(active))
+	}
+	got := active[0]
+	if got.Path != "new/Path.mp4" {
+		t.Fatalf("expected path new/Path.mp4, got %q", got.Path)
+	}
+	if got.MTime != 1 || got.LastSeenAt != 1 || got.LastScannedAt != 1 {
+		t.Fatalf("expected mtime/last_seen_at/last_scanned_at unchanged, got %+v", got)
+	}
+}

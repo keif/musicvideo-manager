@@ -15,6 +15,8 @@ func NewRootCmd(version string) *cobra.Command {
 	}
 	root.AddCommand(newScanCmd())
 	root.AddCommand(newMatchCmd())
+	root.AddCommand(newRenameCmd())
+	root.AddCommand(newNFOCmd())
 	root.AddCommand(newVersionCmd(version))
 	return root
 }
