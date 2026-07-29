@@ -101,3 +101,26 @@ func TestLoadOrCreateParsesExistingMatchSection(t *testing.T) {
 		t.Fatalf("expected confidence threshold 0.85, got %f", cfg.Match.ConfidenceThreshold)
 	}
 }
+
+func TestDefaultIncludesRenameTemplate(t *testing.T) {
+	cfg := config.Default("My Library")
+	if cfg.Rename.Template != "{artist}/{title}" {
+		t.Fatalf("expected default rename template %q, got %q", "{artist}/{title}", cfg.Rename.Template)
+	}
+}
+
+func TestLoadOrCreateParsesExistingRenameSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "schema_version: 1\nlibrary:\n  name: Existing\nscan:\n  extensions: [mp4]\n  workers: 4\nmatch:\n  confidence_threshold: 0.7\nrename:\n  template: \"{artist}/{year} - {title}\"\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := config.LoadOrCreate(path, "Ignored Default")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if cfg.Rename.Template != "{artist}/{year} - {title}" {
+		t.Fatalf("expected loaded rename template, got %q", cfg.Rename.Template)
+	}
+}
