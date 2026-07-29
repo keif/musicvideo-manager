@@ -197,6 +197,41 @@ func TestWriteAllSkipsArtistWithNoMBID(t *testing.T) {
 	}
 }
 
+// TestWriteAllProcessesValidMBIDWhenFoldermateHasEmptyMBID covers a folder
+// shared by two videos where the first video encountered (by v.path order)
+// has an empty ArtistMBID and a later video in the SAME folder has a valid
+// one. The empty-MBID row must not permanently mark the folder as
+// "processed" -- the later, valid-MBID row must still trigger a fetch and
+// have its artwork written.
+func TestWriteAllProcessesValidMBIDWhenFoldermateHasEmptyMBID(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	// "A Song.mp4" sorts before "B Song.mp4" by path, so the empty-MBID
+	// video is the first one WriteAll encounters for this folder.
+	setupConfirmedVideo(t, cat, root, "Various Artists/A Song.mp4", "Unknown Feature", "", "A Song")
+	setupConfirmedVideo(t, cat, root, "Various Artists/B Song.mp4", "Various Artists", "artist-mbid-6", "B Song")
+
+	server := newArtworkTestServer(t, true)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 1 {
+		t.Fatalf("expected 1 artist processed (the valid-MBID video), got %d", result.ArtistsProcessed)
+	}
+	if result.ImagesWritten != 4 {
+		t.Fatalf("expected all 4 artwork files written for the valid-MBID video, got %d", result.ImagesWritten)
+	}
+
+	for _, name := range []string{"folder.jpg", "fanart.jpg", "clearlogo.png", "banner.jpg"} {
+		if _, err := os.Stat(filepath.Join(root, "Various Artists", name)); err != nil {
+			t.Fatalf("expected %s to exist: %v", name, err)
+		}
+	}
+}
+
 func TestWriteAllCountsNoArtworkArtist(t *testing.T) {
 	root := t.TempDir()
 	cat := openTestCatalog(t)

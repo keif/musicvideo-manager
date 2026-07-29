@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -93,7 +94,7 @@ func (c *Client) waitForRateLimit() {
 }
 
 func (c *Client) fetch(ctx context.Context, artistMBID string) (body []byte, notFound bool, err error) {
-	u := c.BaseURL + "/" + artistMBID + "?api_key=" + c.APIKey
+	u := c.BaseURL + "/" + url.PathEscape(artistMBID) + "?api_key=" + url.QueryEscape(c.APIKey)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {

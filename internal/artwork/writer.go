@@ -45,11 +45,10 @@ func WriteAll(ctx context.Context, cat *catalog.Catalog, client *fanarttv.Client
 		if processedDirs[artistDir] {
 			continue
 		}
-		processedDirs[artistDir] = true
-
 		if v.ArtistMBID == "" {
 			continue
 		}
+		processedDirs[artistDir] = true
 
 		result.ArtistsProcessed++
 
