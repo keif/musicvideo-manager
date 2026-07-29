@@ -58,6 +58,24 @@ func TestRenderTemplateZeroYearOmitted(t *testing.T) {
 	}
 }
 
+// TestRenderTemplateSharedSegmentDoesNotCollapseCleanly documents a known
+// limitation of RenderTemplate: when a placeholder shares a path segment
+// with literal text (or another placeholder) rather than occupying the
+// whole segment, an empty value for that placeholder does not cleanly
+// collapse -- surrounding literal text survives. This locks in the current,
+// predictable-but-imperfect behavior so it can't silently regress.
+func TestRenderTemplateSharedSegmentDoesNotCollapseCleanly(t *testing.T) {
+	got, err := rename.RenderTemplate("{artist}/{year} - {album}/{title}", rename.TemplateFields{
+		Artist: "Moby", Title: "Porcelain", Album: "Play", Year: 0,
+	})
+	if err != nil {
+		t.Fatalf("RenderTemplate: %v", err)
+	}
+	if got != "Moby/- Play/Porcelain" {
+		t.Fatalf("expected malformed segment from shared placeholder/literal collapse, got %q", got)
+	}
+}
+
 func TestRenderTemplateEmptyTemplateErrors(t *testing.T) {
 	if _, err := rename.RenderTemplate("", rename.TemplateFields{Artist: "X", Title: "Y"}); err == nil {
 		t.Fatal("expected error for empty template")

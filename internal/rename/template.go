@@ -24,6 +24,18 @@ var placeholderPattern = regexp.MustCompile(`\{(artist|title|album|year)\}`)
 // sanitizing each value for filesystem safety and collapsing any resulting
 // empty path segments. The returned path has no extension -- callers
 // append the source file's own extension.
+//
+// Known limitation: empty-segment collapsing only works cleanly when a
+// placeholder occupies its entire path segment (e.g. "{artist}/{year}/{title}"
+// -- an empty year disappears as its own segment). It does not clean up
+// literal text that shares a segment with an empty placeholder: for
+// "{artist}/{year} - {album}/{title}" with an empty year, the literal
+// " - " separator survives, producing a malformed segment like "- Play"
+// instead of collapsing to "Play". Template authors should give any
+// placeholder that might render empty (e.g. year, album) its own path
+// segment -- prefer "{artist}/{year}/{album}/{title}" over
+// "{artist}/{year} - {album}/{title}" if {year} or {album} might be empty
+// for some videos.
 func RenderTemplate(template string, fields TemplateFields) (string, error) {
 	if strings.TrimSpace(template) == "" {
 		return "", fmt.Errorf("empty rename template")
