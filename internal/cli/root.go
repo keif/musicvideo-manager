@@ -14,6 +14,7 @@ func NewRootCmd(version string) *cobra.Command {
 		Short: "Organize, enrich, and manage a local music video collection",
 	}
 	root.AddCommand(newScanCmd())
+	root.AddCommand(newMatchCmd())
 	root.AddCommand(newVersionCmd(version))
 	return root
 }

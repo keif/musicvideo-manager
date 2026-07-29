@@ -78,3 +78,26 @@ func TestLoadOrCreateRejectsEmptyFile(t *testing.T) {
 		t.Fatalf("expected zero-value SchemaVersion for empty file, got %d", cfg.SchemaVersion)
 	}
 }
+
+func TestDefaultIncludesMatchConfidenceThreshold(t *testing.T) {
+	cfg := config.Default("My Library")
+	if cfg.Match.ConfidenceThreshold != 0.7 {
+		t.Fatalf("expected default confidence threshold 0.7, got %f", cfg.Match.ConfidenceThreshold)
+	}
+}
+
+func TestLoadOrCreateParsesExistingMatchSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "schema_version: 1\nlibrary:\n  name: Existing\nscan:\n  extensions: [mp4]\n  workers: 4\nmatch:\n  confidence_threshold: 0.85\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := config.LoadOrCreate(path, "Ignored Default")
+	if err != nil {
+		t.Fatalf("LoadOrCreate: %v", err)
+	}
+	if cfg.Match.ConfidenceThreshold != 0.85 {
+		t.Fatalf("expected confidence threshold 0.85, got %f", cfg.Match.ConfidenceThreshold)
+	}
+}
