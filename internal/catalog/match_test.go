@@ -115,3 +115,89 @@ func TestListNeedsReviewExcludesConfirmedAndUnmatched(t *testing.T) {
 		t.Fatalf("expected only the review video, got %+v", items)
 	}
 }
+
+func TestListConfirmedMatches(t *testing.T) {
+	cat := openTestCatalog(t)
+
+	confirmedID := insertTestVideo(t, cat, "Artist/Confirmed.mp4")
+	reviewID := insertTestVideo(t, cat, "Artist/Review.mp4")
+
+	artistID, err := cat.UpsertArtist("Artist", "artist-mbid", 100)
+	if err != nil {
+		t.Fatalf("UpsertArtist: %v", err)
+	}
+	songID, err := cat.UpsertSong(artistID, "Title", "Album", 2001, "song-mbid", 100)
+	if err != nil {
+		t.Fatalf("UpsertSong: %v", err)
+	}
+
+	if err := cat.UpsertMatch(&catalog.Match{
+		VideoID: confirmedID, SongID: sql.NullInt64{Int64: songID, Valid: true},
+		Provider: "musicbrainz", Confidence: 1.0, Status: catalog.MatchStatusConfirmed, MatchedAt: 100,
+	}); err != nil {
+		t.Fatalf("UpsertMatch confirmed: %v", err)
+	}
+	if err := cat.UpsertMatch(&catalog.Match{
+		VideoID: reviewID, Provider: "musicbrainz", Confidence: 0.4, Status: catalog.MatchStatusNeedsReview, MatchedAt: 100,
+	}); err != nil {
+		t.Fatalf("UpsertMatch review: %v", err)
+	}
+
+	confirmed, err := cat.ListConfirmedMatches()
+	if err != nil {
+		t.Fatalf("ListConfirmedMatches: %v", err)
+	}
+	if len(confirmed) != 1 {
+		t.Fatalf("expected 1 confirmed match, got %d: %+v", len(confirmed), confirmed)
+	}
+	got := confirmed[0]
+	if got.VideoID != confirmedID || got.VideoPath != "Artist/Confirmed.mp4" {
+		t.Fatalf("unexpected video fields: %+v", got)
+	}
+	if got.Artist != "Artist" || got.Title != "Title" || got.Album != "Album" || got.Year != 2001 {
+		t.Fatalf("unexpected song/artist fields: %+v", got)
+	}
+}
+
+func TestListConfirmedMatchesHandlesNullAlbumAndYear(t *testing.T) {
+	cat := openTestCatalog(t)
+	videoID := insertTestVideo(t, cat, "Artist/Song.mp4")
+
+	artistID, err := cat.UpsertArtist("Artist", "", 100)
+	if err != nil {
+		t.Fatalf("UpsertArtist: %v", err)
+	}
+	songID, err := cat.UpsertSong(artistID, "Title", "", 0, "", 100)
+	if err != nil {
+		t.Fatalf("UpsertSong: %v", err)
+	}
+	if err := cat.UpsertMatch(&catalog.Match{
+		VideoID: videoID, SongID: sql.NullInt64{Int64: songID, Valid: true},
+		Provider: "musicbrainz", Confidence: 1.0, Status: catalog.MatchStatusConfirmed, MatchedAt: 100,
+	}); err != nil {
+		t.Fatalf("UpsertMatch: %v", err)
+	}
+
+	confirmed, err := cat.ListConfirmedMatches()
+	if err != nil {
+		t.Fatalf("ListConfirmedMatches: %v", err)
+	}
+	if len(confirmed) != 1 {
+		t.Fatalf("expected 1 confirmed match, got %d", len(confirmed))
+	}
+	if confirmed[0].Album != "" || confirmed[0].Year != 0 {
+		t.Fatalf("expected empty album and zero year, got %+v", confirmed[0])
+	}
+}
+
+func TestListConfirmedMatchesEmpty(t *testing.T) {
+	cat := openTestCatalog(t)
+
+	confirmed, err := cat.ListConfirmedMatches()
+	if err != nil {
+		t.Fatalf("ListConfirmedMatches: %v", err)
+	}
+	if len(confirmed) != 0 {
+		t.Fatalf("expected 0 confirmed matches, got %d", len(confirmed))
+	}
+}

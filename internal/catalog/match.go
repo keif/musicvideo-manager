@@ -100,3 +100,44 @@ func (c *Catalog) ListNeedsReview() ([]ReviewItem, error) {
 	}
 	return out, rows.Err()
 }
+
+// ConfirmedMatch is a video with a confirmed identification, joined with
+// its song and artist -- the input the rename engine and NFO generator need.
+type ConfirmedMatch struct {
+	VideoID   int64
+	VideoPath string
+	Artist    string
+	Title     string
+	Album     string
+	Year      int
+}
+
+// ListConfirmedMatches returns every video with a confirmed match, joined
+// with its song and artist, ordered by video path.
+func (c *Catalog) ListConfirmedMatches() ([]ConfirmedMatch, error) {
+	rows, err := c.db.Query(`SELECT v.id, v.path, a.name, s.title, s.album, s.year
+		FROM matches m
+		JOIN videos v ON v.id = m.video_id
+		JOIN songs s ON s.id = m.song_id
+		JOIN artists a ON a.id = s.artist_id
+		WHERE m.status = 'confirmed'
+		ORDER BY v.path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ConfirmedMatch{}
+	for rows.Next() {
+		var cm ConfirmedMatch
+		var album sql.NullString
+		var year sql.NullInt64
+		if err := rows.Scan(&cm.VideoID, &cm.VideoPath, &cm.Artist, &cm.Title, &album, &year); err != nil {
+			return nil, err
+		}
+		cm.Album = album.String
+		cm.Year = int(year.Int64)
+		out = append(out, cm)
+	}
+	return out, rows.Err()
+}
