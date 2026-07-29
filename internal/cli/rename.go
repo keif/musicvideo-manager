@@ -23,6 +23,10 @@ func newRenameCmd() *cobra.Command {
 		Short: "Rename catalogued videos into a templated layout",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dryRun && undo {
+				return fmt.Errorf("--dry-run and --undo cannot be used together")
+			}
+
 			root := "."
 			if len(args) == 1 {
 				root = args[0]

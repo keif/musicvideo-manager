@@ -83,6 +83,18 @@ func TestRenameCommandDryRunDoesNotTouchFilesystem(t *testing.T) {
 	}
 }
 
+func TestRenameCommandDryRunAndUndoTogetherErrors(t *testing.T) {
+	root := t.TempDir()
+
+	renameCmd := cli.NewRootCmd("test")
+	renameCmd.SetOut(&bytes.Buffer{})
+	renameCmd.SetArgs([]string{"rename", root, "--dry-run", "--undo"})
+
+	if err := renameCmd.Execute(); err == nil {
+		t.Fatal("expected an error when combining --dry-run and --undo")
+	}
+}
+
 func TestRenameCommandUndoWithNothingToUndoErrors(t *testing.T) {
 	root := t.TempDir()
 
