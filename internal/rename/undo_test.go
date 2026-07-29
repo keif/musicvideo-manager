@@ -149,3 +149,69 @@ func TestUndoSkipsRestoreWhenOriginalPathOccupied(t *testing.T) {
 		t.Fatal("expected an error undoing again since the run was already marked undone")
 	}
 }
+
+// TestUndoRestoresCaseOnlyRenameOnCaseInsensitiveFilesystem proves that
+// undoing a case-only rename (e.g. "Artist/song.mp4" -> "Artist/Song.mp4")
+// actually restores the original casing rather than being falsely skipped.
+// The existence guard added to TestUndoSkipsRestoreWhenOriginalPathOccupied
+// has the same case-insensitive-filesystem blind spot as Apply's guard: on
+// a case-insensitive filesystem, os.Lstat(oldFull) resolves to the very
+// file being restored (just spelled with the post-rename case), not to some
+// other file that has since occupied the original path. See
+// TestApplyPerformsCaseOnlyRenameOnCaseInsensitiveFilesystem for the
+// filesystem-portability rationale reused here.
+func TestUndoRestoresCaseOnlyRenameOnCaseInsensitiveFilesystem(t *testing.T) {
+	root := t.TempDir()
+
+	probePath := filepath.Join(root, "case-probe.tmp")
+	if err := os.WriteFile(probePath, []byte("probe"), 0o644); err != nil {
+		t.Fatalf("WriteFile probe: %v", err)
+	}
+	_, statErr := os.Stat(filepath.Join(root, "CASE-PROBE.tmp"))
+	if err := os.Remove(probePath); err != nil {
+		t.Fatalf("Remove probe: %v", err)
+	}
+	if statErr != nil {
+		t.Skipf("filesystem at %s is case-sensitive (probe file under a different case was not found: %v); "+
+			"a case-only rename cannot collide at the OS level here, so this test cannot exercise the fix", root, statErr)
+	}
+
+	cat := openTestCatalog(t)
+	videoID := setupConfirmedVideo(t, cat, root, "Artist/song.mp4", "Artist", "Song")
+
+	r := &rename.Renamer{Catalog: cat, Template: "{artist}/{title}"}
+	plan, err := r.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if _, err := r.Apply(root, plan); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	result, err := rename.Undo(cat, root)
+	if err != nil {
+		t.Fatalf("Undo: %v", err)
+	}
+	if result.FilesSkipped != 0 {
+		t.Fatalf("expected the case-only restore NOT to be skipped, got %+v", result)
+	}
+	if result.FilesRestored != 1 {
+		t.Fatalf("expected 1 file restored, got %d", result.FilesRestored)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(root, "Artist"))
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "song.mp4" {
+		t.Fatalf("expected exactly one entry named song.mp4, got %+v", entries)
+	}
+
+	active, err := cat.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != videoID || active[0].Path != "Artist/song.mp4" {
+		t.Fatalf("expected catalog path restored to the original case, got %+v", active)
+	}
+}

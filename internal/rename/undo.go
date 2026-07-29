@@ -43,9 +43,31 @@ func Undo(cat *catalog.Catalog, root string) (UndoResult, error) {
 		// os.Rename would silently replace it, so guard with an
 		// existence check and skip this restore rather than overwrite
 		// it -- the rest of the undo still proceeds.
-		if _, err := os.Lstat(oldFull); err == nil {
-			skipped++
-			continue
+		//
+		// On a case-insensitive filesystem (macOS APFS/HFS+, Windows NTFS
+		// by default -- this project's actual target platforms),
+		// os.Lstat(oldFull) resolves case-insensitively, so restoring a
+		// rename that only changed case (e.g. "Artist/Song.mp4" ->
+		// "artist/song.mp4") makes oldFull appear to already exist -- but
+		// what's actually sitting there is the very file being restored,
+		// just spelled with different case. Use os.SameFile to
+		// distinguish that from a real conflict (some other file having
+		// since appeared at the original path): only treat this as a
+		// skip when the existing entry is NOT the same underlying file as
+		// the one currently at newFull.
+		if oldInfo, err := os.Lstat(oldFull); err == nil {
+			newInfo, err := os.Lstat(newFull)
+			if err != nil {
+				return UndoResult{}, fmt.Errorf("check renamed path %s: %w", entry.NewPath, err)
+			}
+			if !os.SameFile(oldInfo, newInfo) {
+				skipped++
+				continue
+			}
+			// Same underlying file: this is a case-only or
+			// Unicode-normalization-only restore on a case-insensitive
+			// filesystem, not a real conflict. Fall through and perform
+			// the restore as if the original path didn't exist.
 		} else if !os.IsNotExist(err) {
 			return UndoResult{}, fmt.Errorf("check existing original path %s: %w", entry.OldPath, err)
 		}

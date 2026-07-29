@@ -363,4 +363,91 @@ func TestApplyContinuesBatchAfterBlockedMove(t *testing.T) {
 	}
 }
 
+// TestApplyPerformsCaseOnlyRenameOnCaseInsensitiveFilesystem proves that a
+// case-only rename -- where the computed target path differs from the
+// confirmed match's current path only in the case of the filename (e.g.
+// "Artist/song.mp4" -> "Artist/Song.mp4") -- is not falsely treated as a
+// blocked conflict. This is the scenario the untracked-file guard added in
+// TestApplyBlocksMoveOntoUntrackedFile got wrong: on a case-insensitive
+// filesystem (macOS APFS/HFS+, Windows NTFS by default -- this project's
+// actual target platforms), os.Lstat(newFull) resolves case-insensitively
+// and finds the source file itself sitting at what looks like the target
+// path. The guard must recognize -- via os.SameFile -- that this is the
+// same underlying file, not a different file already occupying the target,
+// and proceed with the rename rather than adding it to Blocked.
+//
+// Whether this scenario can even arise depends on the filesystem the test
+// suite runs on: on a case-sensitive filesystem (common on Linux CI
+// runners), "song.mp4" and "Song.mp4" are simply two different,
+// non-colliding names, so os.Lstat(newFull) would report "not found" and
+// neither the original bug nor this fix would be exercised. Detect this at
+// runtime by probing the actual temp directory the test uses, and skip
+// with a clear message rather than asserting behavior the filesystem
+// running the test can't exhibit.
+func TestApplyPerformsCaseOnlyRenameOnCaseInsensitiveFilesystem(t *testing.T) {
+	root := t.TempDir()
+
+	probePath := filepath.Join(root, "case-probe.tmp")
+	if err := os.WriteFile(probePath, []byte("probe"), 0o644); err != nil {
+		t.Fatalf("WriteFile probe: %v", err)
+	}
+	_, statErr := os.Stat(filepath.Join(root, "CASE-PROBE.tmp"))
+	if err := os.Remove(probePath); err != nil {
+		t.Fatalf("Remove probe: %v", err)
+	}
+	if statErr != nil {
+		t.Skipf("filesystem at %s is case-sensitive (probe file under a different case was not found: %v); "+
+			"a case-only rename cannot collide at the OS level here, so this test cannot exercise the fix", root, statErr)
+	}
+
+	cat := openTestCatalog(t)
+	videoID := setupConfirmedVideo(t, cat, root, "Artist/song.mp4", "Artist", "Song")
+
+	r := &rename.Renamer{Catalog: cat, Template: "{artist}/{title}"}
+	plan, err := r.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Moves) != 1 || plan.Moves[0].NewPath != "Artist/Song.mp4" {
+		t.Fatalf("expected 1 planned case-only move to Artist/Song.mp4, got %+v", plan.Moves)
+	}
+
+	result, err := r.Apply(root, plan)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(result.Blocked) != 0 {
+		t.Fatalf("expected the case-only rename NOT to be blocked, got %+v", result.Blocked)
+	}
+	if result.FilesRenamed != 1 {
+		t.Fatalf("expected 1 file renamed, got %d", result.FilesRenamed)
+	}
+
+	// Confirm the directory entry itself now carries the canonical case,
+	// not just that a case-insensitive Stat happens to find it.
+	entries, err := os.ReadDir(filepath.Join(root, "Artist"))
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "Song.mp4" {
+		t.Fatalf("expected exactly one entry named Song.mp4, got %+v", entries)
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, "Artist", "Song.mp4"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(content) != "video" {
+		t.Fatalf("unexpected file content after case-only rename: %q", content)
+	}
+
+	active, err := cat.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != videoID || active[0].Path != "Artist/Song.mp4" {
+		t.Fatalf("expected catalog path updated to the canonical case, got %+v", active)
+	}
+}
+
 func sqlNullInt64(v int64) sql.NullInt64 { return sql.NullInt64{Int64: v, Valid: true} }

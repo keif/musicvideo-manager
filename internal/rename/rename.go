@@ -164,9 +164,31 @@ func (r *Renamer) Apply(root string, plan Plan) (Result, error) {
 		// guard against that here with an existence check immediately
 		// before the rename, and skip this move (without aborting the
 		// rest of the batch) if the target is already occupied.
-		if _, err := os.Lstat(newFull); err == nil {
-			blocked = append(blocked, mv)
-			continue
+		//
+		// On a case-insensitive filesystem (macOS APFS/HFS+, Windows NTFS
+		// by default -- this project's actual target platforms),
+		// os.Lstat(newFull) resolves case-insensitively, so a legitimate
+		// case-only or Unicode-normalization-only rename (e.g.
+		// "artist/song.mp4" -> "Artist/Song.mp4") makes newFull appear to
+		// already exist -- but what's actually sitting there is the source
+		// file itself, just spelled with different case. Use os.SameFile
+		// to distinguish that from a real conflict (a different file
+		// already occupying the target): only treat this as blocked when
+		// the existing entry is NOT the same underlying file as the
+		// source.
+		if newInfo, err := os.Lstat(newFull); err == nil {
+			oldInfo, err := os.Lstat(oldFull)
+			if err != nil {
+				return Result{}, fmt.Errorf("check source path %s: %w", mv.OldPath, err)
+			}
+			if !os.SameFile(oldInfo, newInfo) {
+				blocked = append(blocked, mv)
+				continue
+			}
+			// Same underlying file: this is a case-only or
+			// Unicode-normalization-only rename on a case-insensitive
+			// filesystem, not a real conflict. Fall through and perform
+			// the rename as if the target didn't exist.
 		} else if !os.IsNotExist(err) {
 			return Result{}, fmt.Errorf("check existing target %s: %w", mv.NewPath, err)
 		}
