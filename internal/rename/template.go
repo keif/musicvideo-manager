@@ -61,7 +61,11 @@ func RenderTemplate(template string, fields TemplateFields) (string, error) {
 	var kept []string
 	for _, seg := range segments {
 		seg = strings.TrimSpace(seg)
-		if seg != "" {
+		// A segment that is exactly "." or ".." carries no real path
+		// information (and ".." specifically risks escaping the library
+		// root via filepath.Join in the caller), so it is collapsed the
+		// same way an empty segment already is.
+		if seg != "" && seg != "." && seg != ".." {
 			kept = append(kept, seg)
 		}
 	}

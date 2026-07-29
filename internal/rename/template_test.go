@@ -1,6 +1,7 @@
 package rename_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/keif/musicvideo-manager/internal/rename"
@@ -84,6 +85,50 @@ func TestRenderTemplateEmptyTemplateErrors(t *testing.T) {
 
 func TestRenderTemplateAllEmptyAfterSanitizeErrors(t *testing.T) {
 	if _, err := rename.RenderTemplate("{album}", rename.TemplateFields{Artist: "X", Title: "Y"}); err == nil {
+		t.Fatal("expected error when the rendered path has no segments left")
+	}
+}
+
+// TestRenderTemplateCollapsesDotDotSegment proves that a placeholder value
+// of exactly ".." does not survive as its own path segment. Left unhandled,
+// this would render a path like "../Title" that, when joined against the
+// library root by the caller, escapes the root by one directory level.
+func TestRenderTemplateCollapsesDotDotSegment(t *testing.T) {
+	got, err := rename.RenderTemplate("{artist}/{title}", rename.TemplateFields{Artist: "..", Title: "Poison"})
+	if err != nil {
+		t.Fatalf("RenderTemplate: %v", err)
+	}
+	if got != "Poison" {
+		t.Fatalf("expected \"..\" artist segment collapsed away, got %q", got)
+	}
+	if strings.Contains(got, "..") {
+		t.Fatalf("rendered path must not contain a \"..\" segment, got %q", got)
+	}
+}
+
+// TestRenderTemplateCollapsesDotSegment mirrors the ".." case for a bare
+// "." segment, which likewise carries no real path information.
+func TestRenderTemplateCollapsesDotSegment(t *testing.T) {
+	got, err := rename.RenderTemplate("{artist}/{title}", rename.TemplateFields{Artist: ".", Title: "Poison"})
+	if err != nil {
+		t.Fatalf("RenderTemplate: %v", err)
+	}
+	if got != "Poison" {
+		t.Fatalf("expected \".\" artist segment collapsed away, got %q", got)
+	}
+	for _, seg := range strings.Split(got, "/") {
+		if seg == "." {
+			t.Fatalf("rendered path must not contain a \".\" segment, got %q", got)
+		}
+	}
+}
+
+// TestRenderTemplateAllDotDotAfterSanitizeErrors proves that when a
+// template collapses to nothing because its only segment is exactly "..",
+// RenderTemplate still surfaces the existing all-empty-after-sanitize
+// error rather than returning a malformed or empty path silently.
+func TestRenderTemplateAllDotDotAfterSanitizeErrors(t *testing.T) {
+	if _, err := rename.RenderTemplate("{artist}", rename.TemplateFields{Artist: "..", Title: "Y"}); err == nil {
 		t.Fatal("expected error when the rendered path has no segments left")
 	}
 }
