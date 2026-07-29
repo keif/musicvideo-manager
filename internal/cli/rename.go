@@ -62,7 +62,7 @@ func newRenameCmd() *cobra.Command {
 					enc.SetIndent("", "  ")
 					return enc.Encode(result)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Restored %d files\n", result.FilesRestored)
+				fmt.Fprintf(cmd.OutOrStdout(), "Restored %d files, %d skipped\n", result.FilesRestored, result.FilesSkipped)
 				return nil
 			}
 
@@ -98,7 +98,7 @@ func newRenameCmd() *cobra.Command {
 				enc.SetIndent("", "  ")
 				return enc.Encode(result)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Renamed %d files, %d conflicts skipped\n", result.FilesRenamed, len(result.Conflicts))
+			fmt.Fprintf(cmd.OutOrStdout(), "Renamed %d files, %d conflicts skipped, %d blocked\n", result.FilesRenamed, len(result.Conflicts), len(result.Blocked))
 			return nil
 		},
 	}

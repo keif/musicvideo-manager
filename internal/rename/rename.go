@@ -40,8 +40,9 @@ type Plan struct {
 
 // Result is the outcome of actually applying a Plan.
 type Result struct {
-	FilesRenamed int        `json:"files_renamed"`
-	Conflicts    []Conflict `json:"conflicts"`
+	FilesRenamed int           `json:"files_renamed"`
+	Conflicts    []Conflict    `json:"conflicts"`
+	Blocked      []PlannedMove `json:"blocked"`
 }
 
 // occupant is one confirmed match's claim on a target path, tracked
@@ -137,10 +138,10 @@ func (r *Renamer) Plan() (Plan, error) {
 // dry-run branching.
 func (r *Renamer) Apply(root string, plan Plan) (Result, error) {
 	if r.DryRun {
-		return Result{Conflicts: plan.Conflicts}, nil
+		return Result{Conflicts: plan.Conflicts, Blocked: []PlannedMove{}}, nil
 	}
 	if len(plan.Moves) == 0 {
-		return Result{Conflicts: plan.Conflicts}, nil
+		return Result{Conflicts: plan.Conflicts, Blocked: []PlannedMove{}}, nil
 	}
 
 	now := time.Now().Unix()
@@ -150,9 +151,25 @@ func (r *Renamer) Apply(root string, plan Plan) (Result, error) {
 	}
 
 	renamed := 0
+	blocked := []PlannedMove{}
 	for _, mv := range plan.Moves {
 		oldFull := filepath.Join(root, filepath.FromSlash(mv.OldPath))
 		newFull := filepath.Join(root, filepath.FromSlash(mv.NewPath))
+
+		// Plan()'s collision detection only knows about other confirmed
+		// matches -- it has no visibility into unmatched/needs-review
+		// videos or any other untracked file that might already occupy
+		// this exact target path in the real library. os.Rename onto an
+		// existing file silently and atomically replaces it on Unix, so
+		// guard against that here with an existence check immediately
+		// before the rename, and skip this move (without aborting the
+		// rest of the batch) if the target is already occupied.
+		if _, err := os.Lstat(newFull); err == nil {
+			blocked = append(blocked, mv)
+			continue
+		} else if !os.IsNotExist(err) {
+			return Result{}, fmt.Errorf("check existing target %s: %w", mv.NewPath, err)
+		}
 
 		if err := os.MkdirAll(filepath.Dir(newFull), 0o755); err != nil {
 			return Result{}, fmt.Errorf("create directory for %s: %w", mv.NewPath, err)
@@ -173,5 +190,5 @@ func (r *Renamer) Apply(root string, plan Plan) (Result, error) {
 		return Result{}, fmt.Errorf("finish rename run: %w", err)
 	}
 
-	return Result{FilesRenamed: renamed, Conflicts: plan.Conflicts}, nil
+	return Result{FilesRenamed: renamed, Conflicts: plan.Conflicts, Blocked: blocked}, nil
 }

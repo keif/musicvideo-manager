@@ -238,4 +238,129 @@ func TestApplyDryRunTouchesNothing(t *testing.T) {
 	}
 }
 
+// TestApplyBlocksMoveOntoUntrackedFile proves that Apply refuses to
+// os.Rename a confirmed match's file on top of a file at its computed
+// target path that Plan() had no visibility into (e.g. one of the
+// unmatched/needs-review videos, or any other untracked file already
+// physically present in the library). The move must appear in
+// Result.Blocked, the confirmed match's own file must be left in place at
+// its original path, and the untracked file's content must be unchanged.
+func TestApplyBlocksMoveOntoUntrackedFile(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	videoID := setupConfirmedVideo(t, cat, root, "Old Artist Name/Song-video.mp4", "Bon Jovi", "Wanted Dead or Alive")
+
+	// An untracked file already occupies the confirmed match's computed
+	// target path. Plan() has no way to know about this since it only
+	// reasons about other confirmed matches.
+	targetDir := filepath.Join(root, "Bon Jovi")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	targetPath := filepath.Join(targetDir, "Wanted Dead or Alive.mp4")
+	untrackedContent := []byte("untracked file that must survive")
+	if err := os.WriteFile(targetPath, untrackedContent, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	r := &rename.Renamer{Catalog: cat, Template: "{artist}/{title}"}
+	plan, err := r.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Moves) != 1 {
+		t.Fatalf("expected 1 planned move (Plan can't see the untracked file), got %+v", plan.Moves)
+	}
+
+	result, err := r.Apply(root, plan)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.FilesRenamed != 0 {
+		t.Fatalf("expected 0 files renamed, got %d", result.FilesRenamed)
+	}
+	if len(result.Blocked) != 1 || result.Blocked[0].VideoID != videoID {
+		t.Fatalf("expected the move to appear in Blocked, got %+v", result.Blocked)
+	}
+
+	// The confirmed match's own file must still be at its original path.
+	if _, err := os.Stat(filepath.Join(root, "Old Artist Name", "Song-video.mp4")); err != nil {
+		t.Fatalf("expected confirmed match's file left at original path: %v", err)
+	}
+
+	// The untracked file at the target path must be untouched.
+	gotContent, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(gotContent) != string(untrackedContent) {
+		t.Fatalf("expected untracked file content unchanged, got %q", gotContent)
+	}
+
+	// The catalog must not have been updated for the blocked move.
+	active, err := cat.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	if len(active) != 1 || active[0].Path != "Old Artist Name/Song-video.mp4" {
+		t.Fatalf("expected catalog path unchanged for blocked move, got %+v", active)
+	}
+}
+
+// TestApplyContinuesBatchAfterBlockedMove proves that one move being
+// blocked by an untracked file at its target path does not abort the rest
+// of the batch -- matching the codebase's established error-tolerance
+// pattern of recording per-item failures and continuing.
+func TestApplyContinuesBatchAfterBlockedMove(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	blockedID := setupConfirmedVideo(t, cat, root, "Old Artist Name/Song-video.mp4", "Bon Jovi", "Wanted Dead or Alive")
+	okID := setupConfirmedVideo(t, cat, root, "Old Artist Name/Other-video.mp4", "Moby", "Porcelain")
+
+	targetDir := filepath.Join(root, "Bon Jovi")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "Wanted Dead or Alive.mp4"), []byte("untracked"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	r := &rename.Renamer{Catalog: cat, Template: "{artist}/{title}"}
+	plan, err := r.Plan()
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(plan.Moves) != 2 {
+		t.Fatalf("expected 2 planned moves, got %+v", plan.Moves)
+	}
+
+	result, err := r.Apply(root, plan)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if result.FilesRenamed != 1 {
+		t.Fatalf("expected 1 file renamed despite the blocked move, got %d", result.FilesRenamed)
+	}
+	if len(result.Blocked) != 1 || result.Blocked[0].VideoID != blockedID {
+		t.Fatalf("expected 1 blocked move for the untracked-file collision, got %+v", result.Blocked)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "Moby", "Porcelain.mp4")); err != nil {
+		t.Fatalf("expected the unblocked move to complete: %v", err)
+	}
+
+	active, err := cat.ListActive()
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	for _, v := range active {
+		if v.ID == okID && v.Path != "Moby/Porcelain.mp4" {
+			t.Fatalf("expected catalog updated for the successful move, got %+v", v)
+		}
+		if v.ID == blockedID && v.Path != "Old Artist Name/Song-video.mp4" {
+			t.Fatalf("expected catalog unchanged for the blocked move, got %+v", v)
+		}
+	}
+}
+
 func sqlNullInt64(v int64) sql.NullInt64 { return sql.NullInt64{Int64: v, Valid: true} }
