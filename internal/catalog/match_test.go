@@ -201,3 +201,109 @@ func TestListConfirmedMatchesEmpty(t *testing.T) {
 		t.Fatalf("expected 0 confirmed matches, got %d", len(confirmed))
 	}
 }
+
+func TestListConfirmedArtistVideos(t *testing.T) {
+	cat := openTestCatalog(t)
+
+	videoID := insertTestVideo(t, cat, "Bon Jovi/Wanted Dead or Alive.mp4")
+	artistID, err := cat.UpsertArtist("Bon Jovi", "artist-mbid-1", 100)
+	if err != nil {
+		t.Fatalf("UpsertArtist: %v", err)
+	}
+	songID, err := cat.UpsertSong(artistID, "Wanted Dead or Alive", "Slippery When Wet", 1986, "song-mbid-1", 100)
+	if err != nil {
+		t.Fatalf("UpsertSong: %v", err)
+	}
+	if err := cat.UpsertMatch(&catalog.Match{
+		VideoID: videoID, SongID: sql.NullInt64{Int64: songID, Valid: true},
+		Provider: "musicbrainz", Confidence: 1.0, Status: catalog.MatchStatusConfirmed, MatchedAt: 100,
+	}); err != nil {
+		t.Fatalf("UpsertMatch: %v", err)
+	}
+
+	rows, err := cat.ListConfirmedArtistVideos()
+	if err != nil {
+		t.Fatalf("ListConfirmedArtistVideos: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].VideoPath != "Bon Jovi/Wanted Dead or Alive.mp4" || rows[0].Artist != "Bon Jovi" || rows[0].ArtistMBID != "artist-mbid-1" {
+		t.Fatalf("unexpected row: %+v", rows[0])
+	}
+}
+
+func TestListConfirmedArtistVideosHandlesEmptyMBID(t *testing.T) {
+	cat := openTestCatalog(t)
+
+	videoID := insertTestVideo(t, cat, "Unknown Artist/Song.mp4")
+	artistID, err := cat.UpsertArtist("Unknown Artist", "", 100)
+	if err != nil {
+		t.Fatalf("UpsertArtist: %v", err)
+	}
+	songID, err := cat.UpsertSong(artistID, "Song", "", 0, "", 100)
+	if err != nil {
+		t.Fatalf("UpsertSong: %v", err)
+	}
+	if err := cat.UpsertMatch(&catalog.Match{
+		VideoID: videoID, SongID: sql.NullInt64{Int64: songID, Valid: true},
+		Provider: "musicbrainz", Confidence: 1.0, Status: catalog.MatchStatusConfirmed, MatchedAt: 100,
+	}); err != nil {
+		t.Fatalf("UpsertMatch: %v", err)
+	}
+
+	rows, err := cat.ListConfirmedArtistVideos()
+	if err != nil {
+		t.Fatalf("ListConfirmedArtistVideos: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ArtistMBID != "" {
+		t.Fatalf("expected 1 row with empty ArtistMBID, got %+v", rows)
+	}
+}
+
+func TestListConfirmedArtistVideosMultipleVideosSameArtist(t *testing.T) {
+	cat := openTestCatalog(t)
+
+	artistID, err := cat.UpsertArtist("Metallica", "artist-mbid-2", 100)
+	if err != nil {
+		t.Fatalf("UpsertArtist: %v", err)
+	}
+	for _, title := range []string{"One", "Enter Sandman"} {
+		videoID := insertTestVideo(t, cat, "Metallica/"+title+".mp4")
+		songID, err := cat.UpsertSong(artistID, title, "", 0, "song-"+title, 100)
+		if err != nil {
+			t.Fatalf("UpsertSong: %v", err)
+		}
+		if err := cat.UpsertMatch(&catalog.Match{
+			VideoID: videoID, SongID: sql.NullInt64{Int64: songID, Valid: true},
+			Provider: "musicbrainz", Confidence: 1.0, Status: catalog.MatchStatusConfirmed, MatchedAt: 100,
+		}); err != nil {
+			t.Fatalf("UpsertMatch: %v", err)
+		}
+	}
+
+	rows, err := cat.ListConfirmedArtistVideos()
+	if err != nil {
+		t.Fatalf("ListConfirmedArtistVideos: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows (one per video, same artist), got %d: %+v", len(rows), rows)
+	}
+	for _, r := range rows {
+		if r.ArtistMBID != "artist-mbid-2" {
+			t.Fatalf("expected consistent artist MBID across both rows, got %+v", r)
+		}
+	}
+}
+
+func TestListConfirmedArtistVideosEmpty(t *testing.T) {
+	cat := openTestCatalog(t)
+
+	rows, err := cat.ListConfirmedArtistVideos()
+	if err != nil {
+		t.Fatalf("ListConfirmedArtistVideos: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows, got %d", len(rows))
+	}
+}
