@@ -141,3 +141,41 @@ func (c *Catalog) ListConfirmedMatches() ([]ConfirmedMatch, error) {
 	}
 	return out, rows.Err()
 }
+
+// ConfirmedArtistVideo is one confirmed-match video's artist info -- the
+// input the artwork writer uses to derive one artwork fetch per distinct
+// artist folder (grouping by folder happens in the writer, mirroring how
+// the NFO writer deduplicates artist.nfo per folder).
+type ConfirmedArtistVideo struct {
+	VideoPath  string
+	Artist     string
+	ArtistMBID string
+}
+
+// ListConfirmedArtistVideos returns one row per confirmed-match video,
+// carrying its artist's name and MusicBrainz ID, ordered by video path.
+func (c *Catalog) ListConfirmedArtistVideos() ([]ConfirmedArtistVideo, error) {
+	rows, err := c.db.Query(`SELECT v.path, a.name, a.mbid
+		FROM matches m
+		JOIN videos v ON v.id = m.video_id
+		JOIN songs s ON s.id = m.song_id
+		JOIN artists a ON a.id = s.artist_id
+		WHERE m.status = 'confirmed'
+		ORDER BY v.path`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []ConfirmedArtistVideo{}
+	for rows.Next() {
+		var cav ConfirmedArtistVideo
+		var mbid sql.NullString
+		if err := rows.Scan(&cav.VideoPath, &cav.Artist, &mbid); err != nil {
+			return nil, err
+		}
+		cav.ArtistMBID = mbid.String
+		out = append(out, cav)
+	}
+	return out, rows.Err()
+}
