@@ -1,0 +1,368 @@
+package artwork_test
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/keif/musicvideo-manager/internal/artwork"
+	"github.com/keif/musicvideo-manager/internal/catalog"
+	"github.com/keif/musicvideo-manager/internal/providers/fanarttv"
+)
+
+func openTestCatalog(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { cat.Close() })
+	return cat
+}
+
+func setupConfirmedVideo(t *testing.T, cat *catalog.Catalog, root, relPath, artist, artistMBID, title string) {
+	t.Helper()
+	full := filepath.Join(root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(full, []byte("video"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	videoID, err := cat.InsertVideo(&catalog.Video{
+		Path: relPath, FileSize: 5, MTime: 1, PartialHash: relPath,
+		Status: catalog.StatusActive, FirstSeenAt: 1, LastSeenAt: 1, LastScannedAt: 1,
+	})
+	if err != nil {
+		t.Fatalf("InsertVideo: %v", err)
+	}
+	artistID, err := cat.UpsertArtist(artist, artistMBID, 1)
+	if err != nil {
+		t.Fatalf("UpsertArtist: %v", err)
+	}
+	songID, err := cat.UpsertSong(artistID, title, "", 0, "", 1)
+	if err != nil {
+		t.Fatalf("UpsertSong: %v", err)
+	}
+	if err := cat.UpsertMatch(&catalog.Match{
+		VideoID: videoID, SongID: sql.NullInt64{Int64: songID, Valid: true},
+		Provider: "test", Confidence: 1.0, Status: catalog.MatchStatusConfirmed, MatchedAt: 1,
+	}); err != nil {
+		t.Fatalf("UpsertMatch: %v", err)
+	}
+}
+
+// newArtworkTestServer serves a fanart.tv-shaped JSON response (with image
+// URLs pointing back at itself) at /music/{mbid}, and raw image bytes at
+// /images/{name}. Self-referencing the server's own address via r.Host
+// sidesteps the chicken-and-egg problem of needing the server's URL before
+// httptest.NewServer returns it.
+func newArtworkTestServer(t *testing.T, hasArtwork bool) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/music/", func(w http.ResponseWriter, r *http.Request) {
+		if !hasArtwork {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"status":"error"}`))
+			return
+		}
+		base := "http://" + r.Host
+		body := fmt.Sprintf(`{
+			"artistthumb": [{"id":"1","url":"%s/images/thumb.jpg","lang":"","likes":"1"}],
+			"artistbackground": [{"id":"2","url":"%s/images/fanart.jpg","lang":"","likes":"1"}],
+			"hdmusiclogo": [{"id":"3","url":"%s/images/logo.png","lang":"","likes":"1"}],
+			"musicbanner": [{"id":"4","url":"%s/images/banner.jpg","lang":"","likes":"1"}]
+		}`, base, base, base, base)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fake-image-bytes:" + r.URL.Path))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+
+func newTestClient(t *testing.T, cat *catalog.Catalog, server *httptest.Server) *fanarttv.Client {
+	t.Helper()
+	c := fanarttv.New(cat, "test-key")
+	c.BaseURL = server.URL + "/music"
+	c.MinInterval = time.Millisecond
+	return c
+}
+
+func TestWriteAllWritesAllFourArtworkTypes(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Bon Jovi/Wanted Dead or Alive.mp4", "Bon Jovi", "artist-mbid-1", "Wanted Dead or Alive")
+
+	server := newArtworkTestServer(t, true)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 1 || result.ImagesWritten != 4 || result.ImagesSkipped != 0 || result.NoArtwork != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+
+	for _, name := range []string{"folder.jpg", "fanart.jpg", "clearlogo.png", "banner.jpg"} {
+		if _, err := os.Stat(filepath.Join(root, "Bon Jovi", name)); err != nil {
+			t.Fatalf("expected %s to exist: %v", name, err)
+		}
+	}
+}
+
+func TestWriteAllSkipsExistingFiles(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Bon Jovi/Wanted Dead or Alive.mp4", "Bon Jovi", "artist-mbid-1", "Wanted Dead or Alive")
+
+	if err := os.WriteFile(filepath.Join(root, "Bon Jovi", "folder.jpg"), []byte("already here"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	server := newArtworkTestServer(t, true)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ImagesWritten != 3 || result.ImagesSkipped != 1 {
+		t.Fatalf("expected 3 written + 1 skipped, got %+v", result)
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, "Bon Jovi", "folder.jpg"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(content) != "already here" {
+		t.Fatalf("expected existing file to be left untouched, got %q", content)
+	}
+}
+
+func TestWriteAllOneArtistFetchPerFolderNotPerVideo(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Metallica/One.mp4", "Metallica", "artist-mbid-2", "One")
+	setupConfirmedVideo(t, cat, root, "Metallica/Enter Sandman.mp4", "Metallica", "artist-mbid-2", "Enter Sandman")
+
+	var requestCount int
+	server := newArtworkTestServer(t, true)
+	origHandler := server.Config.Handler
+	server.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/music/artist-mbid-2" {
+			requestCount++
+		}
+		origHandler.ServeHTTP(w, r)
+	})
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 1 {
+		t.Fatalf("expected 1 artist processed (one folder, two videos), got %d", result.ArtistsProcessed)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected exactly 1 fanart.tv request for the shared folder, got %d", requestCount)
+	}
+}
+
+func TestWriteAllSkipsArtistWithNoMBID(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Unknown Artist/Song.mp4", "Unknown Artist", "", "Song")
+
+	server := newArtworkTestServer(t, true)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 0 {
+		t.Fatalf("expected 0 artists processed (no MBID), got %d", result.ArtistsProcessed)
+	}
+}
+
+// TestWriteAllProcessesValidMBIDWhenFoldermateHasEmptyMBID covers a folder
+// shared by two videos where the first video encountered (by v.path order)
+// has an empty ArtistMBID and a later video in the SAME folder has a valid
+// one. The empty-MBID row must not permanently mark the folder as
+// "processed" -- the later, valid-MBID row must still trigger a fetch and
+// have its artwork written.
+func TestWriteAllProcessesValidMBIDWhenFoldermateHasEmptyMBID(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	// "A Song.mp4" sorts before "B Song.mp4" by path, so the empty-MBID
+	// video is the first one WriteAll encounters for this folder.
+	setupConfirmedVideo(t, cat, root, "Various Artists/A Song.mp4", "Unknown Feature", "", "A Song")
+	setupConfirmedVideo(t, cat, root, "Various Artists/B Song.mp4", "Various Artists", "artist-mbid-6", "B Song")
+
+	server := newArtworkTestServer(t, true)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 1 {
+		t.Fatalf("expected 1 artist processed (the valid-MBID video), got %d", result.ArtistsProcessed)
+	}
+	if result.ImagesWritten != 4 {
+		t.Fatalf("expected all 4 artwork files written for the valid-MBID video, got %d", result.ImagesWritten)
+	}
+
+	for _, name := range []string{"folder.jpg", "fanart.jpg", "clearlogo.png", "banner.jpg"} {
+		if _, err := os.Stat(filepath.Join(root, "Various Artists", name)); err != nil {
+			t.Fatalf("expected %s to exist: %v", name, err)
+		}
+	}
+}
+
+func TestWriteAllCountsNoArtworkArtist(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Obscure Band/Song.mp4", "Obscure Band", "artist-mbid-3", "Song")
+
+	server := newArtworkTestServer(t, false)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 1 || result.NoArtwork != 1 || result.ImagesWritten != 0 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestWriteAllEmptyLibrary(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+
+	server := newArtworkTestServer(t, true)
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 0 || result.ImagesWritten != 0 {
+		t.Fatalf("expected an all-zero result for an empty library, got %+v", result)
+	}
+}
+
+// TestWriteAllRecordsFetchFailureAndContinues covers the case where
+// ArtworkForArtist itself errors (e.g. the fanart.tv endpoint returns a
+// genuine server error rather than a 404 "no artwork" or a 200 success).
+// Mirrors the server shape used in
+// fanarttv_test.go's TestArtworkForArtistNonNotFoundErrorStatus.
+func TestWriteAllRecordsFetchFailureAndContinues(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Broken Band/Song.mp4", "Broken Band", "artist-mbid-4", "Song")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	t.Cleanup(server.Close)
+
+	client := fanarttv.New(cat, "test-key")
+	client.BaseURL = server.URL + "/music"
+	client.MinInterval = time.Millisecond
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ArtistsProcessed != 1 {
+		t.Fatalf("expected ArtistsProcessed=1 (fetch was attempted), got %d", result.ArtistsProcessed)
+	}
+	if result.ImagesWritten != 0 {
+		t.Fatalf("expected no images written for a failed fetch, got %d", result.ImagesWritten)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected exactly one error entry, got %+v", result.Errors)
+	}
+	if result.Errors[0].Artist != "Broken Band" {
+		t.Fatalf("expected error entry for Broken Band, got %+v", result.Errors[0])
+	}
+	if result.Errors[0].Message == "" {
+		t.Fatalf("expected a non-empty error message")
+	}
+}
+
+// TestWriteAllRecordsPerImageDownloadFailureAndContinues covers the case
+// where ArtworkForArtist succeeds (valid JSON, four URLs) but one of the
+// linked image downloads itself fails. The other three images should still
+// be written -- one bad image must not abort the whole artist.
+func TestWriteAllRecordsPerImageDownloadFailureAndContinues(t *testing.T) {
+	root := t.TempDir()
+	cat := openTestCatalog(t)
+	setupConfirmedVideo(t, cat, root, "Flaky Artist/Song.mp4", "Flaky Artist", "artist-mbid-5", "Song")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/music/", func(w http.ResponseWriter, r *http.Request) {
+		base := "http://" + r.Host
+		body := fmt.Sprintf(`{
+			"artistthumb": [{"id":"1","url":"%s/images/thumb.jpg","lang":"","likes":"1"}],
+			"artistbackground": [{"id":"2","url":"%s/images/fanart.jpg","lang":"","likes":"1"}],
+			"hdmusiclogo": [{"id":"3","url":"%s/images/logo.png","lang":"","likes":"1"}],
+			"musicbanner": [{"id":"4","url":"%s/images/banner.jpg","lang":"","likes":"1"}]
+		}`, base, base, base, base)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	})
+	// Exact-path registration takes priority over the "/images/" prefix
+	// handler below, so only thumb.jpg fails to download.
+	mux.HandleFunc("/images/thumb.jpg", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/images/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("fake-image-bytes:" + r.URL.Path))
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, cat, server)
+
+	result, err := artwork.WriteAll(context.Background(), cat, client, root)
+	if err != nil {
+		t.Fatalf("WriteAll: %v", err)
+	}
+	if result.ImagesWritten != 3 {
+		t.Fatalf("expected 3 images written despite one download failure, got %d", result.ImagesWritten)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected exactly one error entry, got %+v", result.Errors)
+	}
+	if result.Errors[0].Artist != "Flaky Artist" {
+		t.Fatalf("expected error entry for Flaky Artist, got %+v", result.Errors[0])
+	}
+	if result.Errors[0].Message == "" {
+		t.Fatalf("expected a non-empty error message")
+	}
+
+	for _, name := range []string{"fanart.jpg", "clearlogo.png", "banner.jpg"} {
+		if _, err := os.Stat(filepath.Join(root, "Flaky Artist", name)); err != nil {
+			t.Fatalf("expected %s to exist: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "Flaky Artist", "folder.jpg")); !os.IsNotExist(err) {
+		t.Fatalf("expected folder.jpg to NOT exist after a failed download, got err=%v", err)
+	}
+}
