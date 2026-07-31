@@ -60,11 +60,7 @@ func FindExactDuplicates(cat *catalog.Catalog, root string) (Result, error) {
 		candidates[key] = append(candidates[key], v)
 	}
 
-	type hashedVideo struct {
-		video    *catalog.Video
-		fullHash string
-	}
-	fullGroups := map[string][]hashedVideo{}
+	fullGroups := map[string][]*catalog.Video{}
 
 	for _, group := range candidates {
 		if len(group) < 2 {
@@ -78,7 +74,7 @@ func FindExactDuplicates(cat *catalog.Catalog, root string) (Result, error) {
 				continue
 			}
 			result.CandidatesHashed++
-			fullGroups[hash] = append(fullGroups[hash], hashedVideo{video: v, fullHash: hash})
+			fullGroups[hash] = append(fullGroups[hash], v)
 		}
 	}
 
@@ -87,12 +83,12 @@ func FindExactDuplicates(cat *catalog.Catalog, root string) (Result, error) {
 			continue
 		}
 		paths := make([]string, 0, len(entries))
-		for _, e := range entries {
-			paths = append(paths, filepath.Join(root, filepath.FromSlash(e.video.Path)))
+		for _, v := range entries {
+			paths = append(paths, filepath.Join(root, filepath.FromSlash(v.Path)))
 		}
 		sort.Strings(paths)
 
-		size := entries[0].video.FileSize
+		size := entries[0].FileSize
 		result.DuplicateGroups = append(result.DuplicateGroups, DuplicateGroup{
 			FileSize: size,
 			Hash:     hash,
@@ -103,6 +99,9 @@ func FindExactDuplicates(cat *catalog.Catalog, root string) (Result, error) {
 
 	sort.Slice(result.DuplicateGroups, func(i, j int) bool {
 		return result.DuplicateGroups[i].Paths[0] < result.DuplicateGroups[j].Paths[0]
+	})
+	sort.Slice(result.Errors, func(i, j int) bool {
+		return result.Errors[i].VideoPath < result.Errors[j].VideoPath
 	})
 
 	return result, nil

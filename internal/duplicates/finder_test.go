@@ -194,6 +194,44 @@ func TestFindExactDuplicatesRecordsReadErrorAndContinues(t *testing.T) {
 	}
 }
 
+func TestFindExactDuplicatesSortsErrorsByVideoPath(t *testing.T) {
+	root := t.TempDir()
+	contentA := []byte("video bytes group a")
+	contentB := []byte("video bytes group b")
+
+	// Two independent candidate buckets, each with one file present on
+	// disk and one missing. Map iteration order over `candidates` is
+	// randomized, so without sorting, result.Errors could come back in
+	// either order across runs -- this test only proves something with
+	// two independent read failures to order.
+	writeFile(t, filepath.Join(root, "ZReal.mp4"), contentA)
+	// "ZMissing.mp4" is cataloged but has no file on disk.
+	writeFile(t, filepath.Join(root, "AReal.mp4"), contentB)
+	// "AMissing.mp4" is cataloged but has no file on disk.
+
+	cat := openTestCatalog(t)
+	insertVideo(t, cat, "ZReal.mp4", int64(len(contentA)), "group-a-partial-hash")
+	insertVideo(t, cat, "ZMissing.mp4", int64(len(contentA)), "group-a-partial-hash")
+	insertVideo(t, cat, "AReal.mp4", int64(len(contentB)), "group-b-partial-hash")
+	insertVideo(t, cat, "AMissing.mp4", int64(len(contentB)), "group-b-partial-hash")
+
+	result, err := duplicates.FindExactDuplicates(cat, root)
+	if err != nil {
+		t.Fatalf("FindExactDuplicates: %v", err)
+	}
+	if len(result.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %+v", len(result.Errors), result.Errors)
+	}
+	wantOrder := []string{"AMissing.mp4", "ZMissing.mp4"}
+	gotOrder := []string{result.Errors[0].VideoPath, result.Errors[1].VideoPath}
+	if gotOrder[0] != wantOrder[0] || gotOrder[1] != wantOrder[1] {
+		t.Fatalf("expected errors sorted by VideoPath %v, got %v", wantOrder, gotOrder)
+	}
+	if result.Errors[0].Message == "" || result.Errors[1].Message == "" {
+		t.Fatalf("expected non-empty error messages: %+v", result.Errors)
+	}
+}
+
 func TestFindExactDuplicatesReclaimableBytesAcrossMultipleGroups(t *testing.T) {
 	root := t.TempDir()
 	smallContent := []byte("small")
