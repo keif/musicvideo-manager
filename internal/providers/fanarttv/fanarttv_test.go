@@ -13,6 +13,20 @@ import (
 	"github.com/keif/musicvideo-manager/internal/providers/fanarttv"
 )
 
+// recordRequestTimeTransport records the instant each request is handed
+// to the transport -- immediately before it goes out over the network --
+// then delegates to http.DefaultTransport. Used to measure rate-limiter
+// spacing at the point the code under test actually controls, rather than
+// at an httptest server (see TestArtworkForArtistEnforcesRateLimit).
+type recordRequestTimeTransport struct {
+	timestamps *[]time.Time
+}
+
+func (t recordRequestTimeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	*t.timestamps = append(*t.timestamps, time.Now())
+	return http.DefaultTransport.RoundTrip(req)
+}
+
 func openTestCatalog(t *testing.T) *catalog.Catalog {
 	t.Helper()
 	cat, err := catalog.Open(filepath.Join(t.TempDir(), "catalog.sqlite"))
@@ -142,17 +156,29 @@ func TestArtworkForArtistNonNotFoundErrorStatus(t *testing.T) {
 }
 
 func TestArtworkForArtistEnforcesRateLimit(t *testing.T) {
-	var timestamps []time.Time
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		timestamps = append(timestamps, time.Now())
 		_, _ = w.Write([]byte(`{"artistthumb": []}`))
 	}))
 	defer server.Close()
+
+	// Timestamps are recorded by a RoundTripper, at the instant each
+	// request is actually sent, not by the httptest handler after a full
+	// network round trip. The rate limiter only guarantees spacing
+	// between its own client-side timestamps (fanarttv.go's
+	// waitForRateLimit runs before the request is sent) -- measuring at
+	// the server instead is subject to per-request network/connection
+	// jitter (e.g. the first request's fresh-connection setup is often
+	// slower than the second's warm-connection reuse), which can shrink
+	// the observed gap below the guaranteed interval and made this test
+	// intermittently fail in CI even though the rate limiter was correct.
+	var timestamps []time.Time
+	client := &http.Client{Transport: recordRequestTimeTransport{&timestamps}}
 
 	cat := openTestCatalog(t)
 	c := fanarttv.New(cat, "test-key")
 	c.BaseURL = server.URL
 	c.MinInterval = 50 * time.Millisecond
+	c.HTTPClient = client
 
 	if _, err := c.ArtworkForArtist(context.Background(), "mbid-one"); err != nil {
 		t.Fatalf("first ArtworkForArtist: %v", err)
