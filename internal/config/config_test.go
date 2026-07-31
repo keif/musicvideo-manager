@@ -24,6 +24,9 @@ func TestLoadOrCreateWritesDefaultWhenMissing(t *testing.T) {
 	if cfg.Scan.Workers != 0 {
 		t.Fatalf("expected default workers 0 (auto), got %d", cfg.Scan.Workers)
 	}
+	if cfg.Thumbnail.Percent != 10 {
+		t.Fatalf("expected default thumbnail percent 10, got %d", cfg.Thumbnail.Percent)
+	}
 
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected config file to be written to disk: %v", err)

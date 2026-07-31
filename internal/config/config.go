@@ -10,11 +10,12 @@ import (
 // Config is the per-library configuration stored at
 // <library-root>/.musicvideo-manager/config.yaml.
 type Config struct {
-	SchemaVersion int          `yaml:"schema_version"`
-	Library       Library      `yaml:"library"`
-	Scan          ScanConfig   `yaml:"scan"`
-	Match         MatchConfig  `yaml:"match"`
-	Rename        RenameConfig `yaml:"rename"`
+	SchemaVersion int             `yaml:"schema_version"`
+	Library       Library         `yaml:"library"`
+	Scan          ScanConfig      `yaml:"scan"`
+	Match         MatchConfig     `yaml:"match"`
+	Rename        RenameConfig    `yaml:"rename"`
+	Thumbnail     ThumbnailConfig `yaml:"thumbnail"`
 }
 
 type Library struct {
@@ -34,6 +35,10 @@ type RenameConfig struct {
 	Template string `yaml:"template"`
 }
 
+type ThumbnailConfig struct {
+	Percent int `yaml:"percent"`
+}
+
 // Default returns the default configuration for a newly discovered library.
 func Default(libraryName string) Config {
 	return Config{
@@ -48,6 +53,9 @@ func Default(libraryName string) Config {
 		},
 		Rename: RenameConfig{
 			Template: "{artist}/{title}",
+		},
+		Thumbnail: ThumbnailConfig{
+			Percent: 10,
 		},
 	}
 }
