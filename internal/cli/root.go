@@ -19,6 +19,7 @@ func NewRootCmd(version string) *cobra.Command {
 	root.AddCommand(newNFOCmd())
 	root.AddCommand(newArtworkCmd())
 	root.AddCommand(newThumbnailCmd())
+	root.AddCommand(newDuplicatesCmd())
 	root.AddCommand(newVersionCmd(version))
 	return root
 }
