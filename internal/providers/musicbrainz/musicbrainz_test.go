@@ -195,6 +195,57 @@ func TestMatchNonOKStatusReturnsError(t *testing.T) {
 	}
 }
 
+func TestSearchQueryUsesLooseUnquotedTerms(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("query")
+		_, _ = w.Write([]byte(`{"recordings": []}`))
+	}))
+	defer server.Close()
+
+	cat := openTestCatalog(t)
+	p := musicbrainz.New(cat, "test-agent")
+	p.BaseURL = server.URL
+	p.MinInterval = time.Millisecond
+
+	// "Don t Speak" is what ParseFilename produces from a source filename
+	// whose apostrophe was stripped at download time ("Don't Speak" ->
+	// "Don t Speak"). MusicBrainz's index still has the apostrophe, so an
+	// exact quoted phrase search never matches it; an unquoted,
+	// space-separated term group does (verified live against the API).
+	if _, err := p.Match(context.Background(), provider.MatchQuery{Artist: "No Doubt", Title: "Don t Speak"}); err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+
+	want := `artist:(No Doubt) AND recording:(Don t Speak)`
+	if gotQuery != want {
+		t.Fatalf("query: got %q, want %q", gotQuery, want)
+	}
+}
+
+func TestSearchQueryEscapesLuceneSpecialCharacters(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("query")
+		_, _ = w.Write([]byte(`{"recordings": []}`))
+	}))
+	defer server.Close()
+
+	cat := openTestCatalog(t)
+	p := musicbrainz.New(cat, "test-agent")
+	p.BaseURL = server.URL
+	p.MinInterval = time.Millisecond
+
+	if _, err := p.Match(context.Background(), provider.MatchQuery{Artist: "Artist", Title: "Song (Live)"}); err != nil {
+		t.Fatalf("Match: %v", err)
+	}
+
+	want := `artist:(Artist) AND recording:(Song \(Live\))`
+	if gotQuery != want {
+		t.Fatalf("query: got %q, want %q", gotQuery, want)
+	}
+}
+
 func TestName(t *testing.T) {
 	cat := openTestCatalog(t)
 	p := musicbrainz.New(cat, "test-agent")

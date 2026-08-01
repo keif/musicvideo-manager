@@ -25,6 +25,9 @@ func TestParseFilenameDashDelimited(t *testing.T) {
 		{"Backstreet Boys - I Want It That Way Official HD Video [4fndeDfaWCg]", "Backstreet Boys", "Backstreet Boys", "I Want It That Way", 0.8},
 		{"Some Artist - Some Song Lyric Video", "Some Artist", "Some Artist", "Some Song", 0.8},
 		{"Some Artist - Some Song Music Video", "Some Artist", "Some Artist", "Some Song", 0.8},
+		{"Gotye - Somebody That I Used To Know feat. Kimbra Official Music Video [8UVNT4wvIGY]", "Gotye", "Gotye", "Somebody That I Used To Know", 0.8},
+		{"D12 - My Band ft. Cameo Official Music Video [ttWQK5VXskA]", "D12", "D12", "My Band", 0.8},
+		{"Blackstreet - No Diggity Official Music Video ft. Dr. Dre Queen Pen [3KL9mRus19o]", "Blackstreet", "Blackstreet", "No Diggity", 0.8},
 	}
 
 	for _, tc := range cases {
@@ -101,6 +104,36 @@ func TestParseFilenameArtistPrefixNoSpaces(t *testing.T) {
 			}
 			if confidence <= 0.5 {
 				t.Errorf("expected confidence above the generic folder-fallback 0.5, got %f", confidence)
+			}
+		})
+	}
+}
+
+// Some bare-hyphen scene rips put the featured artist between the primary
+// artist and the title ("Beyonce Feat. Sean Paul-Baby Boy..."), so after
+// stripArtistPrefix removes "Beyonce" the leftover still isn't the title --
+// it's "Feat. Sean Paul-Baby Boy", with the real title after the next
+// hyphen.
+func TestParseFilenameArtistPrefixWithFeatClause(t *testing.T) {
+	cases := []struct {
+		filename   string
+		folder     string
+		wantArtist string
+		wantTitle  string
+	}{
+		{"Beyonce Feat. Sean Paul-Baby Boy (MV) 1080i-CtrlHD", "Beyonce", "Beyonce", "Baby Boy"},
+		{"Kid Rock Feat. Sheryl Crow-Picture (MV) 1080i-CtrlHD", "Kid Rock", "Kid Rock", "Picture"},
+		{"Justin Timberlake Feat. Timberland-Sexy Back (MV) 1080i-CtrlHD", "Justin Timberlake", "Justin Timberlake", "Sexy Back"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.filename, func(t *testing.T) {
+			artist, title, _ := match.ParseFilename(tc.filename, tc.folder)
+			if artist != tc.wantArtist {
+				t.Errorf("artist: got %q, want %q", artist, tc.wantArtist)
+			}
+			if title != tc.wantTitle {
+				t.Errorf("title: got %q, want %q", title, tc.wantTitle)
 			}
 		})
 	}

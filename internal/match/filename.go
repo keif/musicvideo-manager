@@ -18,6 +18,7 @@ const artistPrefixSeparators = " \t-–—:"
 // rather than waiting for the next outer-loop pass to pick it up.
 var suffixPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\s*\[[^\]]*\]\s*$`),                                    // trailing [video id]
+	regexp.MustCompile(`(?i)\s*\b(feat\.?|featuring|ft\.?)\b.*$`),                  // trailing "feat./ft./featuring <artist>" credit, and anything after it
 	regexp.MustCompile(`(?i)\s*(extended|long|full|clean|explicit)\s*version\s*$`), // "(Extended|Long|...) Version"
 	regexp.MustCompile(`(?i)\s*\(\s*official(?:\s+\S+){0,3}\s+video\s*\)\s*$`),     // (Official [...] Video), any quality/descriptor words
 	regexp.MustCompile(`(?i)\s*official(?:\s+\S+){0,3}\s+video\s*$`),              // bare Official [...] Video (HD/4K/Music/Long/etc.)
@@ -55,12 +56,25 @@ func ParseFilename(filename, folder string) (artist, title string, confidence fl
 
 	if folder != "" {
 		if rest, ok := stripArtistPrefix(name, folder); ok {
-			return folder, cleanTitle(rest), 0.7
+			return folder, cleanTitle(stripLeadingFeatClause(rest)), 0.7
 		}
 		return folder, cleanTitle(name), 0.5
 	}
 
 	return "", "", 0
+}
+
+// leadingFeatClause matches a "feat./ft./featuring <artist(s)>" credit at
+// the very start of a string, through the separator that follows it.
+var leadingFeatClause = regexp.MustCompile(`(?i)^\s*(feat\.?|featuring|ft\.?)\s+.+?[-–—]\s*`)
+
+// stripLeadingFeatClause removes a leading featured-artist credit, for
+// scene-rip filenames like "Beyonce Feat. Sean Paul-Baby Boy" where
+// stripArtistPrefix has already removed the primary artist ("Beyonce"),
+// leaving the featured artist ahead of the real title ("Baby Boy") rather
+// than trailing after it like the more common "Title feat. Artist" form.
+func stripLeadingFeatClause(s string) string {
+	return leadingFeatClause.ReplaceAllString(s, "")
 }
 
 // stripArtistPrefix removes a leading "<artist><separator>" prefix from

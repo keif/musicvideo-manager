@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,7 +88,15 @@ func (p *MusicBrainzProvider) waitForRateLimit() {
 }
 
 func (p *MusicBrainzProvider) search(ctx context.Context, artist, title string) ([]byte, error) {
-	query := fmt.Sprintf(`artist:%s AND recording:%s`, luceneQuote(artist), luceneQuote(title))
+	// Parenthesized, unquoted term groups rather than exact quoted
+	// phrases: source filenames routinely lose punctuation MusicBrainz's
+	// index still has (apostrophes stripped by download tools, "&"
+	// dropped from artist names, ...), and an exact phrase match on
+	// "Don t Speak" never finds the indexed "Don't Speak". A loose term
+	// query does, and still ranks by the same score/confidence-threshold
+	// gate the caller already applies, so a weaker match just scores
+	// lower rather than false-confirming.
+	query := fmt.Sprintf(`artist:(%s) AND recording:(%s)`, luceneEscape(artist), luceneEscape(title))
 
 	u := p.BaseURL + "/recording?query=" + url.QueryEscape(query) + "&fmt=json"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -113,8 +122,14 @@ func (p *MusicBrainzProvider) search(ctx context.Context, artist, title string) 
 	return body, nil
 }
 
-func luceneQuote(s string) string {
-	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+// luceneSpecial matches characters with special meaning in Lucene query
+// syntax (MusicBrainz search) that must be escaped so they're treated as
+// literal text rather than query operators when embedded, unquoted,
+// inside a parenthesized term group.
+var luceneSpecial = regexp.MustCompile(`([+\-&|!(){}\[\]^"~*?:\\/])`)
+
+func luceneEscape(s string) string {
+	return luceneSpecial.ReplaceAllString(s, `\$1`)
 }
 
 func computeCacheKey(artist, title string) string {
