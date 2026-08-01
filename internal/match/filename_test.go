@@ -20,6 +20,11 @@ func TestParseFilenameDashDelimited(t *testing.T) {
 		{"Beck - Loser Official Music Video [YgSPaXgAdzE]", "Beck", "Beck", "Loser", 0.8},
 		{"Bryan Adams - Summer Of 69 Official Music Video [9f06QZCVUHg]", "Bryan Adams", "Bryan Adams", "Summer Of 69", 0.8},
 		{"Sixpence None The Richer - Kiss Me Official HQ [8N-qO3sPMjc]", "Sixpence None the Richer", "Sixpence None The Richer", "Kiss Me", 0.8},
+		{"AFI - Miss Murder Official Music Video Long Version [YU4hhNKsPog]", "AFI", "AFI", "Miss Murder", 0.8},
+		{"Alanis Morissette - Ironic Official 4K Music Video [Jne9t8sHpUc]", "Alanis Morissette", "Alanis Morissette", "Ironic", 0.8},
+		{"Backstreet Boys - I Want It That Way Official HD Video [4fndeDfaWCg]", "Backstreet Boys", "Backstreet Boys", "I Want It That Way", 0.8},
+		{"Some Artist - Some Song Lyric Video", "Some Artist", "Some Artist", "Some Song", 0.8},
+		{"Some Artist - Some Song Music Video", "Some Artist", "Some Artist", "Some Song", 0.8},
 	}
 
 	for _, tc := range cases {
@@ -65,5 +70,38 @@ func TestParseFilenameNoDelimiterNoFolderReturnsZeroConfidence(t *testing.T) {
 	_, _, confidence := match.ParseFilename("NoDelimiterHere", "")
 	if confidence != 0 {
 		t.Errorf("expected confidence 0 when there's no delimiter and no folder, got %f", confidence)
+	}
+}
+
+// Older scene-rip filenames glue the artist directly onto the title with a
+// bare hyphen ("Artist-Title...", no surrounding spaces), so dashPattern
+// never fires. When the filename starts with the folder's own artist name,
+// ParseFilename should strip that prefix instead of feeding the whole
+// filename (artist + title + rip tags) to the provider as the title.
+func TestParseFilenameArtistPrefixNoSpaces(t *testing.T) {
+	cases := []struct {
+		filename   string
+		folder     string
+		wantArtist string
+		wantTitle  string
+	}{
+		{"Britney Spears-Toxic (MV) 1080i-CtrlHD", "Britney Spears", "Britney Spears", "Toxic"},
+		{"Eminem-Like Toy Soldiers (MV) 1080i-CtrlHD", "Eminem", "Eminem", "Like Toy Soldiers"},
+		{"Justin Timberlake-Cry Me A River (MV) 1080i-CtrlHD", "Justin Timberlake", "Justin Timberlake", "Cry Me A River"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.filename, func(t *testing.T) {
+			artist, title, confidence := match.ParseFilename(tc.filename, tc.folder)
+			if artist != tc.wantArtist {
+				t.Errorf("artist: got %q, want %q", artist, tc.wantArtist)
+			}
+			if title != tc.wantTitle {
+				t.Errorf("title: got %q, want %q", title, tc.wantTitle)
+			}
+			if confidence <= 0.5 {
+				t.Errorf("expected confidence above the generic folder-fallback 0.5, got %f", confidence)
+			}
+		})
 	}
 }
