@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,7 +111,7 @@ func (m *Matcher) applyResult(videoID int64, parsedArtist, parsedTitle string, c
 	}
 	entry.Confidence = best.Confidence
 
-	if best.Confidence < m.ConfidenceThreshold {
+	if best.Confidence < m.ConfidenceThreshold || !looksLikeRealMatch(parsedArtist, parsedTitle, best) {
 		entry.Status = catalog.MatchStatusNeedsReview
 		result.NeedsReview++
 		return m.Catalog.UpsertMatch(entry)
@@ -135,4 +137,60 @@ func nullString(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// tokenPattern splits on Unicode letter/number runs, so accented names
+// ("Mötley Crüe") tokenize as whole words rather than fragmenting on the
+// diacritics.
+var tokenPattern = regexp.MustCompile(`[\p{L}\p{N}]+`)
+
+// junkWords are generic filler terms common in scraped video titles/artist
+// strings. Left in, they'd let two otherwise-unrelated matches appear to
+// "overlap" just because both happen to contain e.g. "Official Music
+// Video" -- exactly the noise looksLikeRealMatch exists to see past.
+var junkWords = map[string]bool{
+	"a": true, "an": true, "and": true, "the": true, "of": true, "with": true, "vs": true,
+	"official": true, "video": true, "music": true, "hd": true, "4k": true, "hq": true, "mv": true,
+	"remaster": true, "remastered": true, "version": true, "lyric": true, "lyrics": true,
+	"feat": true, "ft": true, "featuring": true,
+}
+
+// significantTokens lowercases and splits s into words, dropping junk
+// filler words and bare numbers -- both inflate coincidental overlap
+// between two otherwise-unrelated strings.
+func significantTokens(s string) map[string]bool {
+	tokens := map[string]bool{}
+	for _, w := range tokenPattern.FindAllString(strings.ToLower(s), -1) {
+		if junkWords[w] {
+			continue
+		}
+		if _, err := strconv.Atoi(w); err == nil {
+			continue
+		}
+		tokens[w] = true
+	}
+	return tokens
+}
+
+func hasSharedToken(a, b map[string]bool) bool {
+	for w := range a {
+		if b[w] {
+			return true
+		}
+	}
+	return false
+}
+
+// looksLikeRealMatch guards against the provider's loosened, unquoted
+// query (see musicbrainz.go's search) confidently scoring a completely
+// unrelated recording above the confirmation threshold when fed garbled
+// input -- e.g. a reversed "Title - Artist" filename that ParseFilename
+// has no way to detect. It requires at least one significant word in
+// common between the parsed and matched artist, AND separately between
+// the parsed and matched title: checking the two fields independently
+// stops filler words shared only because both sides happen to contain
+// "Official Music Video" junk from papering over a wrong match.
+func looksLikeRealMatch(parsedArtist, parsedTitle string, candidate provider.MatchResult) bool {
+	return hasSharedToken(significantTokens(parsedArtist), significantTokens(candidate.Artist)) &&
+		hasSharedToken(significantTokens(parsedTitle), significantTokens(candidate.Title))
 }

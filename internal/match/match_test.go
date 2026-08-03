@@ -76,6 +76,53 @@ func TestRunConfirmsHighConfidenceMatch(t *testing.T) {
 	}
 }
 
+func TestRunFlagsUnrelatedHighScoreMatchAsNeedsReview(t *testing.T) {
+	cat := openTestCatalog(t)
+	// Dash-delimited but title-then-artist ("Song - Artist" rather than
+	// the expected "Artist - Song"), so ParseFilename's artist/title
+	// guess comes out reversed/garbled -- same shape as the real
+	// "Crawling Official HD Music Video - Linkin Park" bug.
+	insertActiveVideo(t, cat, "Linkin Park/Crawling Official HD Music Video - Linkin Park.mp4")
+
+	fp := &fakeProvider{name: "fake", results: map[string][]provider.MatchResult{
+		"Crawling Official HD Music Video|Linkin Park": {
+			{Artist: "Video Game Music Box", Title: "Amusement Park", Confidence: 1.0, SourceID: "song-1"},
+		},
+	}}
+	m := &match.Matcher{Catalog: cat, Provider: fp, ConfidenceThreshold: 0.7}
+
+	result, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.NeedsReview != 1 || result.Confirmed != 0 {
+		t.Fatalf("expected a high-scoring but textually unrelated match to need review, got %+v", result)
+	}
+}
+
+func TestRunConfirmsMatchWithPartialTextOverlapDespiteMinorDifferences(t *testing.T) {
+	cat := openTestCatalog(t)
+	insertActiveVideo(t, cat, "50 Cent/50 Cent - In Da Club-video.mp4")
+
+	fp := &fakeProvider{name: "fake", results: map[string][]provider.MatchResult{
+		// Candidate's title isn't a byte-for-byte match ("(Radio Edit)"
+		// suffix, e.g. a real recording variant), but shares enough real
+		// words with the parsed artist/title to be trustworthy.
+		"50 Cent|In Da Club": {
+			{Artist: "50 Cent", Title: "In Da Club (Radio Edit)", Confidence: 0.95, SourceID: "song-1"},
+		},
+	}}
+	m := &match.Matcher{Catalog: cat, Provider: fp, ConfidenceThreshold: 0.7}
+
+	result, err := m.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Confirmed != 1 || result.NeedsReview != 0 {
+		t.Fatalf("expected the partially-overlapping match to confirm, got %+v", result)
+	}
+}
+
 func TestRunFlagsLowConfidenceAsNeedsReview(t *testing.T) {
 	cat := openTestCatalog(t)
 	insertActiveVideo(t, cat, "50 Cent/50 Cent - In Da Club-video.mp4")
