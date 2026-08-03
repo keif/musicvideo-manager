@@ -3,6 +3,8 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/keif/musicvideo-manager/internal/cli"
@@ -31,6 +33,45 @@ func TestArtworkCommandRequiresPriorScan(t *testing.T) {
 
 	if err := rootCmd.Execute(); err == nil {
 		t.Fatal("expected an error when the library hasn't been scanned yet")
+	}
+}
+
+func TestArtworkCommandLoadsAPIKeyFromDotEnvFile(t *testing.T) {
+	t.Setenv("FANARTTV_API_KEY", "")
+	os.Unsetenv("FANARTTV_API_KEY")
+
+	// The .env file lives under $HOME/.config/musicvideo-manager/, not
+	// inside the library being scanned -- redirect HOME so this test
+	// never touches the real user's config.
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	configDir := filepath.Join(fakeHome, ".config", "musicvideo-manager")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, ".env"), []byte("FANARTTV_API_KEY=from-dotenv-file\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	root := t.TempDir()
+	setupCmd := cli.NewRootCmd("test")
+	setupCmd.SetOut(&bytes.Buffer{})
+	setupCmd.SetArgs([]string{"scan", root})
+	if err := setupCmd.Execute(); err != nil {
+		t.Fatalf("setup scan: %v", err)
+	}
+
+	var out bytes.Buffer
+	artworkCmd := cli.NewRootCmd("test")
+	artworkCmd.SetOut(&out)
+	artworkCmd.SetArgs([]string{"artwork", root, "--json"})
+
+	// An empty library never makes a real fanart.tv call, so this only
+	// exercises that the .env file satisfied the API-key check rather than
+	// the command failing with "FANARTTV_API_KEY environment variable is
+	// not set".
+	if err := artworkCmd.Execute(); err != nil {
+		t.Fatalf("artwork Execute: %v", err)
 	}
 }
 

@@ -21,11 +21,6 @@ func newArtworkCmd() *cobra.Command {
 		Short: "Download artist artwork from fanart.tv for confirmed matches",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			apiKey := os.Getenv("FANARTTV_API_KEY")
-			if apiKey == "" {
-				return fmt.Errorf("FANARTTV_API_KEY environment variable is not set")
-			}
-
 			root := "."
 			if len(args) == 1 {
 				root = args[0]
@@ -38,6 +33,19 @@ func newArtworkCmd() *cobra.Command {
 			stateDir := filepath.Join(absRoot, ".musicvideo-manager")
 			if _, err := os.Stat(stateDir); err != nil {
 				return fmt.Errorf("library not yet scanned, run 'scan' first: %w", err)
+			}
+
+			envPath, err := userDotEnvPath()
+			if err != nil {
+				return err
+			}
+			if err := loadDotEnv(envPath); err != nil {
+				return fmt.Errorf("load .env: %w", err)
+			}
+
+			apiKey := os.Getenv("FANARTTV_API_KEY")
+			if apiKey == "" {
+				return fmt.Errorf("FANARTTV_API_KEY environment variable is not set")
 			}
 
 			cat, err := catalog.Open(filepath.Join(stateDir, "catalog.sqlite"))

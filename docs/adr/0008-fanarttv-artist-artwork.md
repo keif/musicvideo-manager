@@ -66,3 +66,15 @@ and bandwidth.
   *name* -- consistent with how `nfo`'s `artist.nfo` is deduplicated, and
   correct because Kodi/Jellyfin/Emby read these files from the folder a
   video lives in, not from a name string.
+
+## Addendum: optional `.env` file (2026-08-03)
+
+Re-exporting `FANARTTV_API_KEY` in every shell session is friction, but a
+`.env` file must not live inside a library's `.musicvideo-manager/`
+directory -- that's precisely the "travels with the library" problem this
+ADR's Decision section already rules out for `config.yaml`. `artwork` now
+optionally loads `~/.config/musicvideo-manager/.env` (`internal/cli/dotenv.go`)
+before checking the environment: one file, outside every library, shared
+across all libraries the tool is pointed at. A real environment variable
+still always wins over the file (`loadDotEnv` skips keys already set), so
+this is additive, not a replacement for the original mechanism.

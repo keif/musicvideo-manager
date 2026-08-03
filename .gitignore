@@ -3,6 +3,7 @@
 *.sqlite
 *.sqlite-journal
 .musicvideo-manager/
+.env
 testdata/fixtures/*.mp4
 !testdata/fixtures/.gitkeep
 .worktrees/
