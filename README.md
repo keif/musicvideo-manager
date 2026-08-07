@@ -14,15 +14,22 @@ generated *from* the catalog, not the other way around. See
 
 ## Status
 
-Early foundation stage. Currently implemented:
+Currently implemented:
 
 - `scan` — walks a library directory, extracts technical metadata via
   ffprobe, and populates the catalog with correct incremental rescan,
   move/rename detection, and missing-file handling.
+- `match` — identifies catalogued videos against MusicBrainz.
+- `rename` — renames catalogued videos into a templated layout, with
+  `--dry-run` preview and `--undo`.
+- `thumbnail` — generates local video thumbnails by extracting a frame
+  with ffmpeg.
+- `artwork` — downloads artist artwork from fanart.tv for confirmed matches.
+- `nfo` — writes Kodi-format NFO files for confirmed matches.
+- `duplicates` — finds byte-identical duplicate videos via full SHA-256
+  hashing.
 
-Not yet implemented (see the roadmap below): metadata matching/identification,
-rename engine, NFO/artwork generation, duplicate detection, collections,
-playlists, web UI.
+Not yet implemented (see the roadmap below): collections, playlists, web UI.
 
 ## Requirements
 
@@ -35,11 +42,39 @@ playlists, web UI.
 go build -o musicvideo-manager ./cmd/musicvideo-manager
 ```
 
+## Configuration
+
+Some commands call third-party metadata/artwork providers and need API
+credentials. Credentials are read from a **user-level** `.env` file — not
+from the library directory — since a library's per-library state (catalog,
+backups, copies) travels with the library, but a credential shouldn't:
+
+```bash
+cp .env.example ~/.config/musicvideo-manager/.env
+```
+
+Then fill in:
+
+| Variable | Used by | Required for | Get a key |
+|---|---|---|---|
+| `FANARTTV_API_KEY` | `artwork` | Downloading artist artwork from fanart.tv | https://fanart.tv/get-an-api-key/ |
+
+Every other command (`scan`, `match`, `rename`, `thumbnail`, `nfo`,
+`duplicates`) works with no configuration — `match` queries the public
+MusicBrainz API, which doesn't require a key.
+
 ## Usage
 
 ```bash
 ./musicvideo-manager scan /path/to/your/music-videos
 ./musicvideo-manager scan /path/to/your/music-videos --json
+./musicvideo-manager match /path/to/your/music-videos
+./musicvideo-manager rename /path/to/your/music-videos --dry-run
+./musicvideo-manager rename /path/to/your/music-videos
+./musicvideo-manager thumbnail /path/to/your/music-videos
+./musicvideo-manager artwork /path/to/your/music-videos
+./musicvideo-manager nfo /path/to/your/music-videos
+./musicvideo-manager duplicates /path/to/your/music-videos
 ./musicvideo-manager version
 ```
 
@@ -51,16 +86,16 @@ files are marked missing (never deleted from the catalog).
 
 ## Roadmap
 
-| Milestone | Scope |
-|---|---|
-| M0 Foundation | repo scaffold, catalog schema, provider interface, CLI skeleton, CI/Docker |
-| M1 Scanner | `scan` command, ffprobe extraction, incremental rescan |
-| M2 Metadata Matching | filename parsing, embedded tags, MusicBrainz/Discogs/TheAudioDB/Last.fm |
-| M3 Rename Engine + NFO | configurable rename templates, Plex/Kodi/Jellyfin/Emby NFO export |
-| M4 Artwork | poster/fanart/logo/banner/thumbnail download and caching |
-| M5 Duplicate Detection | full hash, Chromaprint audio fingerprinting, frame fingerprinting |
-| M6 Collections + Playlists | decade/genre/mood collections, M3U/JSON/smart playlists |
-| M7 Web UI | React search, metadata editor, artwork preview, batch editing |
+| Milestone | Scope | Status |
+|---|---|---|
+| M0 Foundation | repo scaffold, catalog schema, provider interface, CLI skeleton, CI/Docker | done |
+| M1 Scanner | `scan` command, ffprobe extraction, incremental rescan | done |
+| M2 Metadata Matching | filename parsing, embedded tags, MusicBrainz matching | done |
+| M3 Rename Engine + NFO | configurable rename templates, Kodi NFO export | done |
+| M4 Artwork | fanart.tv artist artwork, local ffmpeg thumbnails | done |
+| M5 Duplicate Detection | full SHA-256 hash duplicate detection | done |
+| M6 Collections + Playlists | decade/genre/mood collections, M3U/JSON/smart playlists | not started |
+| M7 Web UI | React search, metadata editor, artwork preview, batch editing | not started |
 
 Each milestone gets its own design spec under `docs/superpowers/specs/`
 before implementation.

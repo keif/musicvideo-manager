@@ -1,7 +1,9 @@
 .PHONY: build test lint testdata docker-build
 
+VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
+
 build:
-	go build -o musicvideo-manager ./cmd/musicvideo-manager
+	go build -ldflags "-X main.version=$(VERSION)" -o musicvideo-manager ./cmd/musicvideo-manager
 
 test:
 	go test ./... -race -cover
